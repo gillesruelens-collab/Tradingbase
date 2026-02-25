@@ -85,9 +85,10 @@
     <div class="card">
       <h3 style="margin:4px 0 8px">Backtest Dashboard (Wins / Losses / Break-even)</h3>
       <div class="btns" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
-        <select id="btYear" style="background:#1a254d;color:#dbe7ff;border:1px solid #304084;border-radius:10px;padding:7px 10px"><option>2024</option><option>2025</option><option>2026</option></select>
+        <select id="btYear" style="background:#1a254d;color:#dbe7ff;border:1px solid #304084;border-radius:10px;padding:7px 10px"><option>2024</option><option>2025</option><option selected>2026</option></select>
         <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="btTrailing" /> Trailing ON</label>
         <button id="btRun">Run backtest</button>
+        <span id="btStatus" class="k"></span>
       </div>
       <div id="btBoard" class="board"></div>
     </div>
@@ -583,7 +584,7 @@ const pairSelect=document.getElementById('pairSelect');
 const bD1=document.getElementById('tfD1'), bH4=document.getElementById('tfH4'), bStrict=document.getElementById('strictBtn'), bRR=document.getElementById('rrBtn');
 const tabAnalysis=document.getElementById('tabAnalysis'), tabBacktest=document.getElementById('tabBacktest');
 const analysisView=document.getElementById('analysisView'), backtestView=document.getElementById('backtestView');
-const btYear=document.getElementById('btYear'), btTrailing=document.getElementById('btTrailing'), btRun=document.getElementById('btRun');
+const btYear=document.getElementById('btYear'), btTrailing=document.getElementById('btTrailing'), btRun=document.getElementById('btRun'), btStatus=document.getElementById('btStatus');
 let currentTf='D1', strictMode=false, rrMult=2;
 bD1.onclick=()=>{currentTf='D1';bD1.classList.add('active');bH4.classList.remove('active');render(currentTf,strictMode)};
 bH4.onclick=()=>{currentTf='H4';bH4.classList.add('active');bD1.classList.remove('active');render(currentTf,strictMode)};
@@ -599,12 +600,25 @@ pairSelect.onchange=()=>{currentPair=pairSelect.value; renderPairBoard(); render
 tabAnalysis.onclick=()=>{tabAnalysis.classList.add('active');tabBacktest.classList.remove('active');analysisView.classList.remove('hidden');backtestView.classList.add('hidden');};
 tabBacktest.onclick=()=>{tabBacktest.classList.add('active');tabAnalysis.classList.remove('active');backtestView.classList.remove('hidden');analysisView.classList.add('hidden');renderBacktestBoard(btYear.value, btTrailing.checked);renderBacktestDetail(btYear.value, btTrailing.checked);};
 
-btRun.onclick=()=>{renderBacktestBoard(btYear.value, btTrailing.checked);renderBacktestDetail(btYear.value, btTrailing.checked);};
+function runBacktestUI(){
+  btRun.textContent='Running...';
+  btStatus.textContent='';
+  const y=btYear.value, tr=btTrailing.checked;
+  setTimeout(()=>{
+    renderBacktestBoard(y, tr);
+    renderBacktestDetail(y, tr);
+    btRun.textContent='Run backtest';
+    btStatus.textContent=`Klaar: ${y} | Trailing ${tr?'ON':'OFF'} | ${new Date().toLocaleTimeString()}`;
+  }, 0);
+}
+
+btRun.onclick=runBacktestUI;
+btYear.onchange=runBacktestUI;
+btTrailing.onchange=runBacktestUI;
 
 renderPairBoard();
 render('D1', false);
-renderBacktestBoard(btYear.value, btTrailing.checked);
-renderBacktestDetail(btYear.value, btTrailing.checked);
+runBacktestUI();
 </script>
 </body>
 </html>
