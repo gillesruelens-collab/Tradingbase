@@ -337,16 +337,16 @@ function render(tf='D1', strictMode=false){
   shapes.push({type:'line',x0,x1,y0:cl.week.wHigh,y1:cl.week.wHigh,line:{color:'#ffcf6b',width:1,dash:'dash'}});
   shapes.push({type:'line',x0,x1,y0:cl.week.wLow,y1:cl.week.wLow,line:{color:'#7ce2ff',width:1,dash:'dash'}});
   shapes.push({type:'line',x0,x1,y0:cl.week.fib618,y1:cl.week.fib618,line:{color:'#c3a6ff',width:1,dash:'dot'}});
-  ann.push({x:x1,y:cl.week.wHigh,text:'Weekly High',showarrow:false,font:{size:10,color:'#ffcf6b'},xanchor:'left',xshift:6});
-  ann.push({x:x1,y:cl.week.wLow,text:'Weekly Low',showarrow:false,font:{size:10,color:'#7ce2ff'},xanchor:'left',xshift:6});
-  ann.push({x:x1,y:cl.week.fib618,text:'Fib 61.8',showarrow:false,font:{size:10,color:'#c3a6ff'},xanchor:'left',xshift:6});
+  ann.push({x:x1,y:cl.week.wHigh,text:'Weekly High',showarrow:false,font:{size:10,color:'#ffcf6b'},xanchor:'right',xshift:-6});
+  ann.push({x:x1,y:cl.week.wLow,text:'Weekly Low',showarrow:false,font:{size:10,color:'#7ce2ff'},xanchor:'right',xshift:-6});
+  ann.push({x:x1,y:cl.week.fib618,text:'Fib 61.8',showarrow:false,font:{size:10,color:'#c3a6ff'},xanchor:'right',xshift:-6});
 
   const trace={type:'candlestick',x:X,open:O,high:H,low:L,close:C,name:`${currentPair} ${tf}`,
     increasing:{line:{color:'#2ad08f'}},decreasing:{line:{color:'#ff6b7d'}}};
 
   Plotly.newPlot('chart',[trace],{
     paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#111831',font:{color:'#dbe7ff'},showlegend:false,
-    margin:{l:48,r:18,t:16,b:40},xaxis:{rangeslider:{visible:false},gridcolor:'#1f2d5f',range:[X[mainStart], X[X.length-1]]},yaxis:{tickformat:'.5f',gridcolor:'#1f2d5f'},
+    margin:{l:48,r:90,t:16,b:40},xaxis:{rangeslider:{visible:false},gridcolor:'#1f2d5f',range:[X[mainStart], X[X.length-1]]},yaxis:{tickformat:'.5f',gridcolor:'#1f2d5f'},
     shapes,annotations:ann
   },{responsive:true});
 
@@ -429,27 +429,27 @@ function render(tf='D1', strictMode=false){
   }
 
   const tAnn=[
-    {x:xD[xD.length-1],y:entry,text:`Entry ${price(entry)}`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#b8cbff'}},
-    {x:xD[xD.length-1],y:sl,text:`SL ${price(sl)}`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#ff9fb0'}},
+    {x:xD[xD.length-1],y:entry,text:`Entry ${price(entry)}`,showarrow:false,xanchor:'right',xshift:-6,font:{size:10,color:'#b8cbff'}},
+    {x:xD[xD.length-1],y:sl,text:`SL ${price(sl)}`,showarrow:false,xanchor:'right',xshift:-6,font:{size:10,color:'#ff9fb0'}},
     {x:xD[Math.max(start, xD.length-25)],y:hD.slice(-20).reduce((a,b)=>Math.max(a,b),-1e9),text:`Current Daily Trend: ${dCl.localState}`,showarrow:false,font:{size:12,color:'#dbe7ff'}}
   ];
   if(activeZone){
-    tAnn.push({x:xD[xD.length-1],y:activeZone.high,text:`${activeZone.name} Fib(61.8-100): ${price(activeZone.low)}-${price(activeZone.high)} | reacts ${activeZone.rx.reactions}/${activeZone.rx.touches}`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:tradeSide==='sell'?'#ffb3bf':'#8df0c9'}});
+    tAnn.push({x:xD[xD.length-1],y:activeZone.high,text:`${activeZone.name} Fib(61.8-100): ${price(activeZone.low)}-${price(activeZone.high)} | reacts ${activeZone.rx.reactions}/${activeZone.rx.touches}`,showarrow:false,xanchor:'right',xshift:-6,font:{size:10,color:tradeSide==='sell'?'#ffb3bf':'#8df0c9'}});
   }
   if(tradeSide==='sell'){
     tAnn.push({x:xD[xD.length-1],y:hD.slice(-20).reduce((a,b)=>Math.max(a,b),-1e9)-0.0005,text:bW.ok?'Bearish W (strict, neckline break)':'Bearish W strict: niet bevestigd',showarrow:false,xanchor:'right',font:{size:10,color:'#ff9fb0'}});
   }
   if(tradeSide!=='none'){
-    tAnn.push({x:xD[xD.length-1],y:tp1,text:`TP1 ${price(tp1)} (RR ${rrMult.toFixed(0)}R)`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#ffd166'}});
-    tAnn.push({x:xD[xD.length-1],y:tp2,text:`TP2 ${price(tp2)} (RR ${(rrMult+1).toFixed(0)}R)`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#f7b500'}});
+    tAnn.push({x:xD[xD.length-1],y:tp1,text:`TP1 ${price(tp1)} (RR ${rrMult.toFixed(0)}R)`,showarrow:false,xanchor:'right',xshift:-6,font:{size:10,color:'#ffd166'}});
+    tAnn.push({x:xD[xD.length-1],y:tp2,text:`TP2 ${price(tp2)} (RR ${(rrMult+1).toFixed(0)}R)`,showarrow:false,xanchor:'right',xshift:-6,font:{size:10,color:'#f7b500'}});
   } else {
-    tAnn.push({x:xD[xD.length-1],y:last.close,text:'NO TRADE: geen duidelijke HH/HL of LH/LL',showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#ffd166'}});
+    tAnn.push({x:xD[xD.length-1],y:last.close,text:'NO TRADE: geen duidelijke HH/HL of LH/LL',showarrow:false,xanchor:'right',xshift:-6,font:{size:10,color:'#ffd166'}});
   }
 
   Plotly.newPlot('trendChart',[{type:'candlestick',x:xD.slice(start),open:oD.slice(start),high:hD.slice(start),low:lD.slice(start),close:cD.slice(start),
       increasing:{line:{color:'#2ad08f'}},decreasing:{line:{color:'#ff6b7d'}}}],{
     paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#111831',font:{color:'#dbe7ff'},showlegend:false,
-    margin:{l:48,r:18,t:10,b:35},xaxis:{rangeslider:{visible:false},gridcolor:'#1f2d5f',range:[xD[start],xD[xD.length-1]]},yaxis:{tickformat:'.5f',gridcolor:'#1f2d5f'},
+    margin:{l:48,r:95,t:10,b:35},xaxis:{rangeslider:{visible:false},gridcolor:'#1f2d5f',range:[xD[start],xD[xD.length-1]]},yaxis:{tickformat:'.5f',gridcolor:'#1f2d5f'},
     shapes:tShapes,annotations:tAnn
   },{responsive:true});
 }
