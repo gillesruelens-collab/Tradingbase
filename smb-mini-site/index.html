@@ -31,8 +31,9 @@
     table{width:100%;border-collapse:collapse;font-size:12px}
     th,td{padding:6px;border-bottom:1px solid var(--line);text-align:right}
     th:first-child,td:first-child{text-align:left}
-    .row-win{background:rgba(42,208,143,0.12)} .row-loss{background:rgba(255,107,125,0.12)} .row-be{background:rgba(255,215,122,0.16)}
+    .row-win{background:rgba(42,208,143,0.22)} .row-loss{background:rgba(255,107,125,0.22)} .row-be{background:rgba(255,215,122,0.24)}
     .clickable-row{cursor:pointer}
+    .res-win{color:#58f3b7;font-weight:700}.res-loss{color:#ff8ea0;font-weight:700}.res-be{color:#ffd77a;font-weight:700}
     @media(max-width:980px){.grid{grid-template-columns:1fr 1fr}.row{grid-template-columns:1fr}}
   </style>
 </head>
@@ -606,16 +607,23 @@ function renderBacktestDetail(year, trailing, startCapital, riskPct){
   const tbody=document.querySelector('#btTable tbody');
   const detail=document.getElementById('btTradeDetail');
   tbody.innerHTML='';
-  r.trades.forEach(t=>{
+  r.trades.forEach((t,idx)=>{
     const tr=document.createElement('tr');
     const cls = t.result==='LOSS' ? 'row-loss' : (t.result==='BE' ? 'row-be' : 'row-win');
+    const rCls = t.result==='LOSS' ? 'res-loss' : (t.result==='BE' ? 'res-be' : 'res-win');
     tr.className = `clickable-row ${cls}`;
-    tr.innerHTML=`<td>${t.date}</td><td>${t.side}</td><td>${price(t.entry)}</td><td>${price(t.sl)}</td><td>${price(t.tp)}</td><td>${t.result}</td><td>${t.pnl.toFixed(2)}</td><td>${t.equity.toFixed(2)}</td>`;
-    tr.onclick=()=>{
-      detail.innerHTML = `<div><b>${currentPair}</b> | ${t.date} | ${t.side} | Resultaat: <b>${t.result}</b></div><div style='margin-top:6px'>Trigger: ${t.trigger}</div><div style='margin-top:6px'>Zone: ${t.zone} | Entry ${price(t.entry)} | SL ${price(t.sl)} | TP ${price(t.tp)}</div><div style='margin-top:6px'>PnL: <b>€${t.pnl.toFixed(2)}</b> | Equity na trade: <b>€${t.equity.toFixed(2)}</b></div>`;
-    };
+    tr.dataset.idx = String(idx);
+    tr.innerHTML=`<td>${t.date}</td><td>${t.side}</td><td>${price(t.entry)}</td><td>${price(t.sl)}</td><td>${price(t.tp)}</td><td class='${rCls}'>${t.result}</td><td>${t.pnl.toFixed(2)}</td><td>${t.equity.toFixed(2)}</td>`;
     tbody.appendChild(tr);
   });
+
+  tbody.onclick=(ev)=>{
+    const row = ev.target.closest('tr[data-idx]');
+    if(!row) return;
+    const t = r.trades[Number(row.dataset.idx)];
+    if(!t) return;
+    detail.innerHTML = `<div><b>${currentPair}</b> | ${t.date} | ${t.side} | Resultaat: <b>${t.result}</b></div><div style='margin-top:6px'>Trigger: ${t.trigger}</div><div style='margin-top:6px'>Zone: ${t.zone} | Entry ${price(t.entry)} | SL ${price(t.sl)} | TP ${price(t.tp)}</div><div style='margin-top:6px'>PnL: <b>€${t.pnl.toFixed(2)}</b> | Equity na trade: <b>€${t.equity.toFixed(2)}</b></div>`;
+  };
 }
 
 function renderPairBoard(){
