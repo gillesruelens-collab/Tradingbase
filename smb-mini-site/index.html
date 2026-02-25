@@ -15,7 +15,9 @@
     .btns button.active{background:#3553bf}
     .grid{display:grid;grid-template-columns:repeat(4,minmax(170px,1fr));gap:10px;margin:12px 0}
     .board{display:grid;grid-template-columns:repeat(6,minmax(130px,1fr));gap:8px;margin:10px 0}
-    .pairCard{background:#101733;border:1px solid #233065;border-radius:10px;padding:8px}
+    .pairCard{background:#101733;border:1px solid #233065;border-radius:10px;padding:8px;cursor:pointer;transition:.15s transform,.15s border-color}
+    .pairCard:hover{transform:translateY(-1px);border-color:#6f8dff}
+    .pairCard.active{outline:1px solid #6f8dff}
     .pairCard .p{font-weight:700;font-size:12px}
     .pairCard .s{font-size:11px;color:#b8cbff}
     .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px}
@@ -461,10 +463,16 @@ function renderPairBoard(){
     const cl=classify(arr, st.trend, st.events, st.S, false, true, arr); // strict check
     const ok=cl.strictPass && cl.pattern!=='NO TRADE (STRICT PDF)';
     const tone=ok?'#2ad08f':'#ff9fb0';
-    html.push(`<div class='pairCard' data-p='${p}' style='border-color:${tone}55'><div class='p'>${p}</div><div class='s' style='color:${tone}'>${ok?'TRADE MOGELIJK':'GEEN TRADE'}</div><div class='s'>${cl.localState}</div></div>`);
+    const active = p===currentPair ? 'active' : '';
+    html.push(`<button type='button' class='pairCard ${active}' data-p='${p}' style='border-color:${tone}55'><div class='p'>${p}</div><div class='s' style='color:${tone}'>${ok?'TRADE MOGELIJK':'GEEN TRADE'}</div><div class='s'>${cl.localState}</div></button>`);
   }
   board.innerHTML=html.join('');
-  board.querySelectorAll('.pairCard').forEach(el=>el.onclick=()=>{currentPair=el.dataset.p; pairSelect.value=currentPair; render(currentTf,strictMode)});
+  board.querySelectorAll('.pairCard').forEach(el=>el.addEventListener('click',()=>{
+    currentPair=el.dataset.p;
+    pairSelect.value=currentPair;
+    renderPairBoard();
+    render(currentTf,strictMode);
+  }));
 }
 
 const pairSelect=document.getElementById('pairSelect');
@@ -479,7 +487,7 @@ const pairKeys=Object.keys(ALL).sort();
 pairSelect.innerHTML = pairKeys.map(p=>`<option value="${p}">${p}</option>`).join('');
 if(!pairKeys.includes(currentPair) && pairKeys.length) currentPair=pairKeys[0];
 pairSelect.value=currentPair;
-pairSelect.onchange=()=>{currentPair=pairSelect.value; render(currentTf,strictMode)};
+pairSelect.onchange=()=>{currentPair=pairSelect.value; renderPairBoard(); render(currentTf,strictMode)};
 
 renderPairBoard();
 render('D1', false);
