@@ -36,11 +36,16 @@
     <div class="btns">
       <button id="tfD1" class="active">D1 (real data)</button>
       <button id="tfH4">H4 curve (gesimuleerd)</button>
+      <button id="strictBtn">Strict PDF mode: OFF</button>
     </div>
   </div>
 
   <div class="grid" id="stats"></div>
   <div id="chart"></div>
+  <div class="card" style="margin-top:10px">
+    <h3 style="margin:4px 0 8px">Daily Trend Focus (met Supply/Demand + TP)</h3>
+    <div id="trendChart" style="height:42vh;min-height:320px"></div>
+  </div>
 
   <div class="row">
     <div class="card">
@@ -126,7 +131,7 @@ function latestWeekContext(d1data){
   return {wk,wHigh,wLow,close,range,closePct,fib618};
 }
 
-function classify(data,trend,events,S,isH4=false){
+function classify(data,trend,events,S,isH4=false,strictMode=false){
   const last = events.slice(-1)[0];
   const recent = events.slice(-4);
   const up = recent.filter(e=>e.label.includes('↑')).length;
@@ -173,13 +178,26 @@ function classify(data,trend,events,S,isH4=false){
     tone='bad';
   }
 
-  return {pattern,advice,tone,momentum:momentum.toFixed(1),regime,localState,week:W,nearWeeklyLow,inLowerThird};
+  // Strict PDF-mode: toon enkel "actieve" setups als alle kernregels matchen
+  let strictPass = true;
+  if(strictMode){
+    const bearishStrict = localLH && localLL && !nearWeeklyLow;
+    const bullishStrict = localHH && localHL && W.closePct < 66.66;
+    strictPass = bearishStrict || bullishStrict;
+    if(!strictPass){
+      pattern = 'NO TRADE (STRICT PDF)';
+      advice = 'Geen setup: wacht tot prijs in reverse-zone komt + pattern confirmatie (M/W/H&S/iH&S).';
+      tone = 'warn';
+    }
+  }
+
+  return {pattern,advice,tone,momentum:momentum.toFixed(1),regime,localState,week:W,nearWeeklyLow,inLowerThird,strictPass};
 }
 
-function render(tf='D1'){
+function render(tf='D1', strictMode=false){
   const data = tf==='D1' ? d1 : h4;
   const O=data.map(d=>d.open),H=data.map(d=>d.high),L=data.map(d=>d.low),C=data.map(d=>d.close),X=data.map(d=>d.date);
-  const st=structure(data); const gaps=fvg(data); const cl=classify(data,st.trend,st.events,st.S,tf==='H4');
+  const st=structure(data); const gaps=fvg(data); const cl=classify(data,st.trend,st.events,st.S,tf==='H4',strictMode);
 
   const avgRange=data.slice(-20).reduce((a,d)=>a+(d.high-d.low),0)/20;
   const stats=[
@@ -187,6 +205,7 @@ function render(tf='D1'){
     ['Macro trend', cl.regime],
     ['Lokale structuur', cl.localState],
     ['Pattern', cl.pattern],
+    ['Strict PDF', strictMode ? (cl.strictPass ? 'PASS' : 'BLOCK') : 'OFF'],
     ['Weekly close in range', cl.week.closePct.toFixed(2)+'%'],
     ['Weekly H/L', `${price(cl.week.wHigh)} / ${price(cl.week.wLow)}`],
     ['Fib reverse zone', `${price(cl.week.fib618)} - ${price(cl.week.wHigh)}`],
@@ -239,6 +258,7 @@ function render(tf='D1'){
   const lastEvent = st.events.slice(-1)[0];
   document.getElementById('advice').innerHTML = `
     <div>Patroon: <span class="pill ${cl.tone}"><b>${cl.pattern}</b></span></div>
+    <div>Strict PDF mode: <b>${strictMode ? (cl.strictPass ? 'AAN (PASS)' : 'AAN (BLOCK)') : 'UIT'}</b></div>
     <div>Advies: <span class="${cl.tone}"><b>${cl.advice}</b></span></div>
     <div>Macro trend: <b>${cl.regime}</b> | Lokale structuur: <b>${cl.localState}</b></div>
     <div>Weekly context (TFD): H=<b>${price(cl.week.wHigh)}</b>, L=<b>${price(cl.week.wLow)}</b>, CloseInRange=<b>${cl.week.closePct.toFixed(2)}%</b></div>
@@ -254,12 +274,48 @@ function render(tf='D1'){
     tr.innerHTML=`<td>${d.date}</td><td>${price(d.open)}</td><td>${price(d.high)}</td><td>${price(d.low)}</td><td>${price(d.close)}</td><td>${pip(d.high-d.low)} p</td>`;
     tbody.appendChild(tr);
   });
+
+  // Extra grafische voorstelling: alleen huidige daily trend + supply/demand + TP
+  const dDaily = d1;
+  const stD = structure(dDaily);
+  const last = dDaily[dDaily.length-1];
+  const trendDir = stD.trend === 'bear' ? 'bear' : 'bull';
+  const supply = stD.S.highs.slice(-1)[0];
+  const demand = stD.S.lows.slice(-1)[0];
+  const xD = dDaily.map(d=>d.date), oD=dDaily.map(d=>d.open), hD=dDaily.map(d=>d.high), lD=dDaily.map(d=>d.low), cD=dDaily.map(d=>d.close);
+  const start = Math.max(0, dDaily.length-80);
+
+  let entry = last.close, sl = trendDir==='bear' ? (supply?.price ?? last.high) : (demand?.price ?? last.low);
+  let tp = trendDir==='bear' ? (demand?.price ?? (last.close - 0.0100)) : (supply?.price ?? (last.close + 0.0100));
+  if(trendDir==='bear' && tp>=entry) tp = entry - Math.abs(entry-sl)*1.5;
+  if(trendDir==='bull' && tp<=entry) tp = entry + Math.abs(entry-sl)*1.5;
+
+  const tShapes=[];
+  if(supply) tShapes.push({type:'rect',x0:xD[start],x1:xD[xD.length-1],y0:supply.price-0.0008,y1:supply.price+0.0008,fillcolor:'rgba(255,107,125,0.16)',line:{color:'rgba(255,107,125,0.55)',width:1}});
+  if(demand) tShapes.push({type:'rect',x0:xD[start],x1:xD[xD.length-1],y0:demand.price-0.0008,y1:demand.price+0.0008,fillcolor:'rgba(42,208,143,0.16)',line:{color:'rgba(42,208,143,0.55)',width:1}});
+  tShapes.push({type:'line',x0:xD[start],x1:xD[xD.length-1],y0:tp,y1:tp,line:{color:'#ffd166',dash:'dash',width:2}});
+
+  const tAnn=[
+    {x:xD[xD.length-1],y:tp,text:`TP ${price(tp)}`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#ffd166'}},
+    {x:xD[xD.length-1],y:entry,text:`Entry ${price(entry)}`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#b8cbff'}},
+    {x:xD[xD.length-1],y:sl,text:`SL ${price(sl)}`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#ff9fb0'}},
+    {x:xD[Math.max(start, xD.length-25)],y:hD.slice(-20).reduce((a,b)=>Math.max(a,b),-1e9),text:`Current Daily Trend: ${trendDir.toUpperCase()}`,showarrow:false,font:{size:12,color:'#dbe7ff'}}
+  ];
+
+  Plotly.newPlot('trendChart',[{type:'candlestick',x:xD.slice(start),open:oD.slice(start),high:hD.slice(start),low:lD.slice(start),close:cD.slice(start),
+      increasing:{line:{color:'#2ad08f'}},decreasing:{line:{color:'#ff6b7d'}}}],{
+    paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#111831',font:{color:'#dbe7ff'},showlegend:false,
+    margin:{l:48,r:18,t:10,b:35},xaxis:{rangeslider:{visible:false},gridcolor:'#1f2d5f'},yaxis:{tickformat:'.5f',gridcolor:'#1f2d5f'},
+    shapes:tShapes,annotations:tAnn
+  },{responsive:true});
 }
 
-const bD1=document.getElementById('tfD1'), bH4=document.getElementById('tfH4');
-bD1.onclick=()=>{bD1.classList.add('active');bH4.classList.remove('active');render('D1')};
-bH4.onclick=()=>{bH4.classList.add('active');bD1.classList.remove('active');render('H4')};
-render('D1');
+const bD1=document.getElementById('tfD1'), bH4=document.getElementById('tfH4'), bStrict=document.getElementById('strictBtn');
+let currentTf='D1', strictMode=false;
+bD1.onclick=()=>{currentTf='D1';bD1.classList.add('active');bH4.classList.remove('active');render(currentTf,strictMode)};
+bH4.onclick=()=>{currentTf='H4';bH4.classList.add('active');bD1.classList.remove('active');render(currentTf,strictMode)};
+bStrict.onclick=()=>{strictMode=!strictMode; bStrict.textContent=`Strict PDF mode: ${strictMode?'ON':'OFF'}`; bStrict.classList.toggle('active', strictMode); render(currentTf,strictMode)};
+render('D1', false);
 </script>
 </body>
 </html>
