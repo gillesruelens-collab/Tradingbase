@@ -57,7 +57,7 @@
   <div id="chart"></div>
   <div class="card" style="margin-top:10px">
     <h3 style="margin:4px 0 8px">Daily Trend Focus (met Supply/Demand + TP)</h3>
-    <div id="trendChart" style="height:42vh;min-height:320px"></div>
+    <div id="trendChart" style="height:50vh;min-height:360px"></div>
   </div>
 
   <div class="row">
@@ -289,6 +289,8 @@ function render(tf='D1', strictMode=false){
   const h4Local = toH4Synthetic(d1);
   const data = tf==='D1' ? d1 : h4Local;
   const O=data.map(d=>d.open),H=data.map(d=>d.high),L=data.map(d=>d.low),C=data.map(d=>d.close),X=data.map(d=>d.date);
+  const mainBars = tf==='D1' ? 75 : 140;
+  const mainStart = Math.max(0, data.length-mainBars);
   const st=structure(data); const gaps=fvg(data); const cl=classify(data,st.trend,st.events,st.S,tf==='H4',strictMode,d1);
 
   document.getElementById('pairLabel').textContent = `${currentPair} (laatste candle: ${d1[d1.length-1]?.date || '-'})`;
@@ -344,7 +346,7 @@ function render(tf='D1', strictMode=false){
 
   Plotly.newPlot('chart',[trace],{
     paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#111831',font:{color:'#dbe7ff'},showlegend:false,
-    margin:{l:48,r:18,t:16,b:40},xaxis:{rangeslider:{visible:false},gridcolor:'#1f2d5f'},yaxis:{tickformat:'.5f',gridcolor:'#1f2d5f'},
+    margin:{l:48,r:18,t:16,b:40},xaxis:{rangeslider:{visible:false},gridcolor:'#1f2d5f',range:[X[mainStart], X[X.length-1]]},yaxis:{tickformat:'.5f',gridcolor:'#1f2d5f'},
     shapes,annotations:ann
   },{responsive:true});
 
@@ -376,7 +378,7 @@ function render(tf='D1', strictMode=false){
   const last = dDaily[dDaily.length-1];
   const zones = fibZonesFromSwings(dDaily, stD.S);
   const xD = dDaily.map(d=>d.date), oD=dDaily.map(d=>d.open), hD=dDaily.map(d=>d.high), lD=dDaily.map(d=>d.low), cD=dDaily.map(d=>d.close);
-  const start = Math.max(0, dDaily.length-80);
+  const start = Math.max(0, dDaily.length-40);
 
   let tradeSide = 'none';
   if(dCl.localState.includes('BEARISH')) tradeSide='sell';
@@ -447,7 +449,7 @@ function render(tf='D1', strictMode=false){
   Plotly.newPlot('trendChart',[{type:'candlestick',x:xD.slice(start),open:oD.slice(start),high:hD.slice(start),low:lD.slice(start),close:cD.slice(start),
       increasing:{line:{color:'#2ad08f'}},decreasing:{line:{color:'#ff6b7d'}}}],{
     paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#111831',font:{color:'#dbe7ff'},showlegend:false,
-    margin:{l:48,r:18,t:10,b:35},xaxis:{rangeslider:{visible:false},gridcolor:'#1f2d5f'},yaxis:{tickformat:'.5f',gridcolor:'#1f2d5f'},
+    margin:{l:48,r:18,t:10,b:35},xaxis:{rangeslider:{visible:false},gridcolor:'#1f2d5f',range:[xD[start],xD[xD.length-1]]},yaxis:{tickformat:'.5f',gridcolor:'#1f2d5f'},
     shapes:tShapes,annotations:tAnn
   },{responsive:true});
 }
