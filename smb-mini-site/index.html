@@ -349,9 +349,17 @@ function render(tf='D1', strictMode=false){
   const sellRx = countZoneReactions(dDaily, supplyZone.low, supplyZone.high, 'sell');
   const buyRx = countZoneReactions(dDaily, demandZone.low, demandZone.high, 'buy');
 
+  // Toon slechts 1 actieve zone (zoals gevraagd): supply OF demand op basis van huidige structuur
+  const activeZone = tradeSide==='sell'
+    ? {name:'Supply', low:supplyZone.low, high:supplyZone.high, rx:sellRx, color:'rgba(255,107,125,0.16)', line:'rgba(255,107,125,0.55)'}
+    : tradeSide==='buy'
+      ? {name:'Demand', low:demandZone.low, high:demandZone.high, rx:buyRx, color:'rgba(42,208,143,0.16)', line:'rgba(42,208,143,0.55)'}
+      : null;
+
   const tShapes=[];
-  tShapes.push({type:'rect',x0:xD[start],x1:xD[xD.length-1],y0:supplyZone.low,y1:supplyZone.high,fillcolor:'rgba(255,107,125,0.16)',line:{color:'rgba(255,107,125,0.55)',width:1}});
-  tShapes.push({type:'rect',x0:xD[start],x1:xD[xD.length-1],y0:demandZone.low,y1:demandZone.high,fillcolor:'rgba(42,208,143,0.16)',line:{color:'rgba(42,208,143,0.55)',width:1}});
+  if(activeZone){
+    tShapes.push({type:'rect',x0:xD[start],x1:xD[xD.length-1],y0:activeZone.low,y1:activeZone.high,fillcolor:activeZone.color,line:{color:activeZone.line,width:1}});
+  }
   if(tradeSide!=='none'){
     tShapes.push({type:'line',x0:xD[start],x1:xD[xD.length-1],y0:tp1,y1:tp1,line:{color:'#ffd166',dash:'dash',width:2}});
     tShapes.push({type:'line',x0:xD[start],x1:xD[xD.length-1],y0:tp2,y1:tp2,line:{color:'#f7b500',dash:'dot',width:2}});
@@ -360,10 +368,11 @@ function render(tf='D1', strictMode=false){
   const tAnn=[
     {x:xD[xD.length-1],y:entry,text:`Entry ${price(entry)}`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#b8cbff'}},
     {x:xD[xD.length-1],y:sl,text:`SL ${price(sl)}`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#ff9fb0'}},
-    {x:xD[xD.length-1],y:supplyZone.high,text:`Supply Fib(61.8-100): ${price(supplyZone.low)}-${price(supplyZone.high)} | reacts ${sellRx.reactions}/${sellRx.touches}` ,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#ffb3bf'}},
-    {x:xD[xD.length-1],y:demandZone.low,text:`Demand Fib(61.8-100): ${price(demandZone.low)}-${price(demandZone.high)} | reacts ${buyRx.reactions}/${buyRx.touches}`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#8df0c9'}},
     {x:xD[Math.max(start, xD.length-25)],y:hD.slice(-20).reduce((a,b)=>Math.max(a,b),-1e9),text:`Current Daily Trend: ${dCl.localState}`,showarrow:false,font:{size:12,color:'#dbe7ff'}}
   ];
+  if(activeZone){
+    tAnn.push({x:xD[xD.length-1],y:activeZone.high,text:`${activeZone.name} Fib(61.8-100): ${price(activeZone.low)}-${price(activeZone.high)} | reacts ${activeZone.rx.reactions}/${activeZone.rx.touches}`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:tradeSide==='sell'?'#ffb3bf':'#8df0c9'}});
+  }
   if(tradeSide!=='none'){
     tAnn.push({x:xD[xD.length-1],y:tp1,text:`TP1 ${price(tp1)} (RR ${rrMult.toFixed(0)}R)`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#ffd166'}});
     tAnn.push({x:xD[xD.length-1],y:tp2,text:`TP2 ${price(tp2)} (RR ${(rrMult+1).toFixed(0)}R)`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#f7b500'}});
