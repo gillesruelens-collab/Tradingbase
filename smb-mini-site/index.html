@@ -115,35 +115,52 @@ function structure(data){
   return {S,events,trend};
 }
 
-function classify(data,trend,events){
+function classify(data,trend,events,S){
   const last = events.slice(-1)[0];
   const recent = events.slice(-4);
   const up = recent.filter(e=>e.label.includes('↑')).length;
   const down = recent.filter(e=>e.label.includes('↓')).length;
   const momentum = (data[data.length-1].close - data[Math.max(0,data.length-6)].close) * 10000;
 
+  // Lokale structuur (laatste swing highs/lows)
+  const h2 = S.highs.slice(-2);
+  const l2 = S.lows.slice(-2);
+  const localLH = h2.length===2 ? h2[1].price < h2[0].price : false;
+  const localLL = l2.length===2 ? l2[1].price < l2[0].price : false;
+  const localHH = h2.length===2 ? h2[1].price > h2[0].price : false;
+  const localHL = l2.length===2 ? l2[1].price > l2[0].price : false;
+
   let pattern='RANGE / ONBESLIST';
   if(last && last.label.startsWith('CHoCH')) pattern='REVERSAL RISK';
   if((trend==='bull' && up>=down+2) || (trend==='bear' && down>=up+2)) pattern='CONTINUATION';
 
+  // Override met lokale structuur als die duidelijk tegengesteld is
+  let regime = trend.toUpperCase();
+  let localState = 'MIXED';
+  if(localLH && localLL){ localState='BEARISH (LH+LL)'; if(trend==='bull') pattern='PULLBACK / MOGELIJKE REVERSAL'; }
+  if(localHH && localHL){ localState='BULLISH (HH+HL)'; if(trend==='bear') pattern='PULLBACK / MOGELIJKE REVERSAL'; }
+
   let advice='Afblijven tot betere confirmatie.';
   let tone='warn';
-  if(pattern==='CONTINUATION' && trend==='bull' && momentum>0){ advice='Bias LONG: wacht op retrace naar bullish OB/FVG + LTF confirmatie.'; tone='good'; }
-  if(pattern==='CONTINUATION' && trend==='bear' && momentum<0){ advice='Bias SHORT: wacht op pullback naar bearish OB/FVG + LTF confirmatie.'; tone='good'; }
-  if(pattern==='REVERSAL RISK'){ advice='Mogelijke omkeer: eerst extra CHoCH/BOS confirmatie op lagere TF voor entry.'; tone='bad'; }
+  if(localLH && localLL){ advice='Korte termijn bias SHORT/correctie: wacht op pullback naar premium + bearish confirmatie.'; tone='bad'; }
+  else if(localHH && localHL){ advice='Korte termijn bias LONG: wacht op retrace naar discount + bullish confirmatie.'; tone='good'; }
+  else if(pattern==='CONTINUATION' && trend==='bull' && momentum>0){ advice='Bias LONG: wacht op retrace naar bullish OB/FVG + LTF confirmatie.'; tone='good'; }
+  else if(pattern==='CONTINUATION' && trend==='bear' && momentum<0){ advice='Bias SHORT: wacht op pullback naar bearish OB/FVG + LTF confirmatie.'; tone='good'; }
+  else if(pattern.includes('REVERSAL')){ advice='Mogelijke omkeer: eerst extra CHoCH/BOS confirmatie op lagere TF voor entry.'; tone='bad'; }
 
-  return {pattern,advice,tone,momentum:momentum.toFixed(1)};
+  return {pattern,advice,tone,momentum:momentum.toFixed(1),regime,localState};
 }
 
 function render(tf='D1'){
   const data = tf==='D1' ? d1 : h4;
   const O=data.map(d=>d.open),H=data.map(d=>d.high),L=data.map(d=>d.low),C=data.map(d=>d.close),X=data.map(d=>d.date);
-  const st=structure(data); const gaps=fvg(data); const cl=classify(data,st.trend,st.events);
+  const st=structure(data); const gaps=fvg(data); const cl=classify(data,st.trend,st.events,st.S);
 
   const avgRange=data.slice(-20).reduce((a,d)=>a+(d.high-d.low),0)/20;
   const stats=[
     ['Timeframe', tf],
-    ['Trend status', st.trend.toUpperCase()],
+    ['Macro trend', cl.regime],
+    ['Lokale structuur', cl.localState],
     ['Pattern', cl.pattern],
     ['Momentum (5 bars)', cl.momentum+' pips'],
     ['Laatste close', price(C[C.length-1])],
@@ -187,7 +204,8 @@ function render(tf='D1'){
   document.getElementById('advice').innerHTML = `
     <div>Patroon: <span class="pill ${cl.tone}"><b>${cl.pattern}</b></span></div>
     <div>Advies: <span class="${cl.tone}"><b>${cl.advice}</b></span></div>
-    <div>Trend: <b>${st.trend.toUpperCase()}</b> | Laatste structuur-event: <b>${lastEvent?`${lastEvent.label} (${data[lastEvent.i].date})`:'geen'}</b></div>
+    <div>Macro trend: <b>${cl.regime}</b> | Lokale structuur: <b>${cl.localState}</b></div>
+    <div>Laatste structuur-event: <b>${lastEvent?`${lastEvent.label} (${data[lastEvent.i].date})`:'geen'}</b></div>
     <div>Execution flow: Bias → liquidity sweep → CHoCH/MSS (LTF) → retrace naar OB/FVG → entry met strak risico.</div>
     <div style="margin-top:6px" class="k">Dit is educatieve analyse, geen financieel advies.</div>`;
 
