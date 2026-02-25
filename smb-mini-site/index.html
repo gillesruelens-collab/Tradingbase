@@ -14,6 +14,10 @@
     .btns button{background:#1a254d;color:#dbe7ff;border:1px solid #304084;border-radius:10px;padding:7px 12px;cursor:pointer}
     .btns button.active{background:#3553bf}
     .grid{display:grid;grid-template-columns:repeat(4,minmax(170px,1fr));gap:10px;margin:12px 0}
+    .board{display:grid;grid-template-columns:repeat(6,minmax(130px,1fr));gap:8px;margin:10px 0}
+    .pairCard{background:#101733;border:1px solid #233065;border-radius:10px;padding:8px}
+    .pairCard .p{font-weight:700;font-size:12px}
+    .pairCard .s{font-size:11px;color:#b8cbff}
     .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px}
     .k{font-size:12px;color:var(--muted)} .v{font-size:20px;font-weight:700}
     #chart{height:65vh;min-height:500px;background:var(--card);border:1px solid var(--line);border-radius:12px}
@@ -34,14 +38,17 @@
       <div class="k">Cutoff: <b>21/02/2026</b> | <span id="pairLabel">EURUSD</span></div>
     </div>
     <div class="btns">
-      <select id="pairSelect" style="background:#1a254d;color:#dbe7ff;border:1px solid #304084;border-radius:10px;padding:7px 10px;margin-right:6px">
-        <option>EURUSD</option><option>GBPUSD</option><option>USDJPY</option><option>AUDUSD</option><option>USDCAD</option><option>USDCHF</option>
-      </select>
+      <select id="pairSelect" style="background:#1a254d;color:#dbe7ff;border:1px solid #304084;border-radius:10px;padding:7px 10px;margin-right:6px"></select>
       <button id="tfD1" class="active">D1 (real data)</button>
       <button id="tfH4">H4 curve (gesimuleerd)</button>
       <button id="strictBtn">Strict PDF mode: OFF</button>
       <button id="rrBtn">RR model: 1:2</button>
     </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin:4px 0 8px">FX Dashboard – Trade mogelijk?</h3>
+    <div id="pairBoard" class="board"></div>
   </div>
 
   <div class="grid" id="stats"></div>
@@ -137,7 +144,7 @@ function latestWeekContext(d1data){
   return {wk,wHigh,wLow,close,range,closePct,fib618};
 }
 
-function classify(data,trend,events,S,isH4=false,strictMode=false){
+function classify(data,trend,events,S,isH4=false,strictMode=false,baseDaily=d1){
   const last = events.slice(-1)[0];
   const recent = events.slice(-4);
   const up = recent.filter(e=>e.label.includes('↑')).length;
@@ -150,7 +157,7 @@ function classify(data,trend,events,S,isH4=false,strictMode=false){
   const localHH = h2.length===2 ? h2[1].price > h2[0].price : false;
   const localHL = l2.length===2 ? l2[1].price > l2[0].price : false;
 
-  const W = latestWeekContext(d1);
+  const W = latestWeekContext(baseDaily);
   const nearWeeklyLow = Math.abs(W.close-W.wLow)*10000 <= 50;
   const inLowerThird = W.closePct <= 33.33;
 
@@ -280,7 +287,7 @@ function render(tf='D1', strictMode=false){
   const h4Local = toH4Synthetic(d1);
   const data = tf==='D1' ? d1 : h4Local;
   const O=data.map(d=>d.open),H=data.map(d=>d.high),L=data.map(d=>d.low),C=data.map(d=>d.close),X=data.map(d=>d.date);
-  const st=structure(data); const gaps=fvg(data); const cl=classify(data,st.trend,st.events,st.S,tf==='H4',strictMode);
+  const st=structure(data); const gaps=fvg(data); const cl=classify(data,st.trend,st.events,st.S,tf==='H4',strictMode,d1);
 
   document.getElementById('pairLabel').textContent = `${currentPair} (laatste candle: ${d1[d1.length-1]?.date || '-'})`;
   const avgRange=data.slice(-20).reduce((a,d)=>a+(d.high-d.low),0)/20;
@@ -363,7 +370,7 @@ function render(tf='D1', strictMode=false){
   // Extra grafische voorstelling: alleen huidige daily trend + supply/demand + TP
   const dDaily = d1;
   const stD = structure(dDaily);
-  const dCl = classify(dDaily, stD.trend, stD.events, stD.S, false, strictMode);
+  const dCl = classify(dDaily, stD.trend, stD.events, stD.S, false, strictMode, dDaily);
   const last = dDaily[dDaily.length-1];
   const zones = fibZonesFromSwings(dDaily, stD.S);
   const xD = dDaily.map(d=>d.date), oD=dDaily.map(d=>d.open), hD=dDaily.map(d=>d.high), lD=dDaily.map(d=>d.low), cD=dDaily.map(d=>d.close);
@@ -443,6 +450,23 @@ function render(tf='D1', strictMode=false){
   },{responsive:true});
 }
 
+function renderPairBoard(){
+  const board=document.getElementById('pairBoard');
+  const keys=Object.keys(ALL).sort();
+  const html=[];
+  for(const p of keys){
+    const arr=ALL[p];
+    if(!arr || arr.length<80) continue;
+    const st=structure(arr);
+    const cl=classify(arr, st.trend, st.events, st.S, false, true, arr); // strict check
+    const ok=cl.strictPass && cl.pattern!=='NO TRADE (STRICT PDF)';
+    const tone=ok?'#2ad08f':'#ff9fb0';
+    html.push(`<div class='pairCard' data-p='${p}' style='border-color:${tone}55'><div class='p'>${p}</div><div class='s' style='color:${tone}'>${ok?'TRADE MOGELIJK':'GEEN TRADE'}</div><div class='s'>${cl.localState}</div></div>`);
+  }
+  board.innerHTML=html.join('');
+  board.querySelectorAll('.pairCard').forEach(el=>el.onclick=()=>{currentPair=el.dataset.p; pairSelect.value=currentPair; render(currentTf,strictMode)});
+}
+
 const pairSelect=document.getElementById('pairSelect');
 const bD1=document.getElementById('tfD1'), bH4=document.getElementById('tfH4'), bStrict=document.getElementById('strictBtn'), bRR=document.getElementById('rrBtn');
 let currentTf='D1', strictMode=false, rrMult=2;
@@ -450,7 +474,14 @@ bD1.onclick=()=>{currentTf='D1';bD1.classList.add('active');bH4.classList.remove
 bH4.onclick=()=>{currentTf='H4';bH4.classList.add('active');bD1.classList.remove('active');render(currentTf,strictMode)};
 bStrict.onclick=()=>{strictMode=!strictMode; bStrict.textContent=`Strict PDF mode: ${strictMode?'ON':'OFF'}`; bStrict.classList.toggle('active', strictMode); render(currentTf,strictMode)};
 bRR.onclick=()=>{rrMult = rrMult===2 ? 3 : 2; bRR.textContent=`RR model: 1:${rrMult}`; bRR.classList.toggle('active', rrMult===3); render(currentTf,strictMode)};
+
+const pairKeys=Object.keys(ALL).sort();
+pairSelect.innerHTML = pairKeys.map(p=>`<option value="${p}">${p}</option>`).join('');
+if(!pairKeys.includes(currentPair) && pairKeys.length) currentPair=pairKeys[0];
+pairSelect.value=currentPair;
 pairSelect.onchange=()=>{currentPair=pairSelect.value; render(currentTf,strictMode)};
+
+renderPairBoard();
 render('D1', false);
 </script>
 </body>
