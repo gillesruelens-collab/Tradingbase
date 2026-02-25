@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SITE_DIR="/home/tradingclaw/.openclaw/workspace/smb-mini-site"
+
+cmd="${1:-}"
+port="${2:-8787}"
+
+case "$cmd" in
+  start)
+    exec "$SITE_DIR/start-site.sh" "$port"
+    ;;
+  stop)
+    exec "$SITE_DIR/stop-site.sh"
+    ;;
+  status)
+    exec "$SITE_DIR/status-site.sh" "$port"
+    ;;
+  *)
+    echo "Usage: smb-site {start|stop|status} [port]"
+    exit 1
+    ;;
+esac
