@@ -13,6 +13,8 @@
     .top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
     .btns button{background:#1a254d;color:#dbe7ff;border:1px solid #304084;border-radius:10px;padding:7px 12px;cursor:pointer}
     .btns button.active{background:#3553bf}
+    .tabs{display:flex;gap:8px;margin:10px 0}
+    .hidden{display:none}
     .grid{display:grid;grid-template-columns:repeat(4,minmax(170px,1fr));gap:10px;margin:12px 0}
     .board{display:grid;grid-template-columns:repeat(6,minmax(130px,1fr));gap:8px;margin:10px 0}
     .pairCard{background:#101733;border:1px solid #233065;border-radius:10px;padding:8px;cursor:pointer;transition:.15s transform,.15s border-color;color:#eaf0ff;text-align:left}
@@ -48,6 +50,12 @@
     </div>
   </div>
 
+  <div class="tabs btns">
+    <button id="tabAnalysis" class="active">SMB Analyse</button>
+    <button id="tabBacktest">Backtesting</button>
+  </div>
+
+  <div id="analysisView">
   <div class="card">
     <h3 style="margin:4px 0 8px">FX Dashboard – Trade mogelijk?</h3>
     <div id="pairBoard" class="board"></div>
@@ -69,6 +77,29 @@
     <div class="card">
       <h3>Laatste 20 candles (huidige view)</h3>
       <div style="max-height:350px;overflow:auto"><table id="tbl"><thead><tr><th>Datum</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Range</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+  </div>
+
+  <div id="backtestView" class="hidden">
+    <div class="card">
+      <h3 style="margin:4px 0 8px">Backtest Dashboard (Wins / Losses / Break-even)</h3>
+      <div class="btns" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <select id="btYear" style="background:#1a254d;color:#dbe7ff;border:1px solid #304084;border-radius:10px;padding:7px 10px"><option>2024</option><option>2025</option><option>2026</option></select>
+        <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="btTrailing" /> Trailing ON</label>
+        <button id="btRun">Run backtest</button>
+      </div>
+      <div id="btBoard" class="board"></div>
+    </div>
+    <div class="row">
+      <div class="card">
+        <h3>Detail voor geselecteerd pair</h3>
+        <div id="btDetail"></div>
+      </div>
+      <div class="card">
+        <h3>Laatste trades</h3>
+        <div style="max-height:350px;overflow:auto"><table id="btTable"><thead><tr><th>Date</th><th>Side</th><th>Entry</th><th>SL</th><th>TP</th><th>Result</th></tr></thead><tbody></tbody></table></div>
+      </div>
     </div>
   </div>
 </div>
@@ -454,6 +485,77 @@ function render(tf='D1', strictMode=false){
   },{responsive:true});
 }
 
+function runBacktestForPair(arr, year='2026', trailing=false){
+  const rows = arr.filter(r=>r.date.startsWith(year+'-'));
+  const trades=[];
+  for(let i=70;i<rows.length-8;i++){
+    const slice = rows.slice(Math.max(0,i-70), i+1);
+    const st = structure(slice);
+    const cl = classify(slice, st.trend, st.events, st.S, false, true, slice);
+    let side = cl.localState.includes('BEARISH') ? 'SELL' : cl.localState.includes('BULLISH') ? 'BUY' : null;
+    if(!side || cl.pattern==='NO TRADE (STRICT PDF)') continue;
+
+    const zones = fibZonesFromSwings(slice, st.S);
+    const entry = rows[i].close;
+    const sl = side==='SELL' ? zones.supplyHigh + 0.0015 : zones.demandLow - 0.0015;
+    const risk = Math.max(Math.abs(entry-sl), 0.0020);
+    const tp = side==='SELL' ? entry - 2*risk : entry + 2*risk;
+
+    let result='LOSS';
+    let slLive=sl;
+    for(let j=i+1;j<Math.min(rows.length,i+10);j++){
+      const b=rows[j];
+      const up = ((b.high-entry)/entry)*100;
+      const dn = ((entry-b.low)/entry)*100;
+      if(trailing){
+        if(side==='BUY'){
+          if(up>=1) slLive=Math.max(slLive, entry); // BE
+          if(up>=2) slLive=Math.max(slLive, entry*1.01); // lock 1%
+        }else{
+          if(dn>=1) slLive=Math.min(slLive, entry);
+          if(dn>=2) slLive=Math.min(slLive, entry*0.99);
+        }
+      }
+      if(side==='BUY'){
+        if(b.low<=slLive){ result = slLive===entry ? 'BE' : (slLive>entry ? 'WIN-TS' : 'LOSS'); break; }
+        if(b.high>=tp){ result='WIN'; break; }
+      } else {
+        if(b.high>=slLive){ result = slLive===entry ? 'BE' : (slLive<entry ? 'WIN-TS' : 'LOSS'); break; }
+        if(b.low<=tp){ result='WIN'; break; }
+      }
+    }
+    trades.push({date:rows[i].date,side,entry,sl,tp,result});
+  }
+  const wins = trades.filter(t=>t.result.startsWith('WIN')).length;
+  const losses = trades.filter(t=>t.result==='LOSS').length;
+  const be = trades.filter(t=>t.result==='BE').length;
+  return {wins,losses,be,trades,total:trades.length};
+}
+
+function renderBacktestBoard(year, trailing){
+  const btBoard=document.getElementById('btBoard');
+  const keys=Object.keys(ALL).sort();
+  const blocks=[];
+  for(const p of keys){
+    const r=runBacktestForPair(ALL[p], year, trailing);
+    blocks.push(`<button type='button' class='pairCard ${p===currentPair?'active':''}' data-p='${p}'><div class='p'>${p}</div><div class='s'>W:${r.wins} L:${r.losses} BE:${r.be}</div><div class='s'>Trades: ${r.total}</div></button>`);
+  }
+  btBoard.innerHTML=blocks.join('');
+  btBoard.querySelectorAll('.pairCard').forEach(el=>el.onclick=()=>{currentPair=el.dataset.p; pairSelect.value=currentPair; renderBacktestDetail(year,trailing); renderBacktestBoard(year,trailing); render(currentTf,strictMode)});
+}
+
+function renderBacktestDetail(year, trailing){
+  const r=runBacktestForPair(ALL[currentPair]||[], year, trailing);
+  document.getElementById('btDetail').innerHTML = `<div><b>${currentPair}</b> | Jaar ${year} | Trailing: ${trailing?'ON':'OFF'}</div><div style='margin-top:6px'>Wins: <b class='good'>${r.wins}</b> | Losses: <b class='bad'>${r.losses}</b> | Break-even: <b class='warn'>${r.be}</b> | Totaal: <b>${r.total}</b></div>`;
+  const tbody=document.querySelector('#btTable tbody');
+  tbody.innerHTML='';
+  r.trades.slice(-40).reverse().forEach(t=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${t.date}</td><td>${t.side}</td><td>${price(t.entry)}</td><td>${price(t.sl)}</td><td>${price(t.tp)}</td><td>${t.result}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
 function renderPairBoard(){
   const board=document.getElementById('pairBoard');
   const keys=Object.keys(ALL).sort();
@@ -479,6 +581,9 @@ function renderPairBoard(){
 
 const pairSelect=document.getElementById('pairSelect');
 const bD1=document.getElementById('tfD1'), bH4=document.getElementById('tfH4'), bStrict=document.getElementById('strictBtn'), bRR=document.getElementById('rrBtn');
+const tabAnalysis=document.getElementById('tabAnalysis'), tabBacktest=document.getElementById('tabBacktest');
+const analysisView=document.getElementById('analysisView'), backtestView=document.getElementById('backtestView');
+const btYear=document.getElementById('btYear'), btTrailing=document.getElementById('btTrailing'), btRun=document.getElementById('btRun');
 let currentTf='D1', strictMode=false, rrMult=2;
 bD1.onclick=()=>{currentTf='D1';bD1.classList.add('active');bH4.classList.remove('active');render(currentTf,strictMode)};
 bH4.onclick=()=>{currentTf='H4';bH4.classList.add('active');bD1.classList.remove('active');render(currentTf,strictMode)};
@@ -489,10 +594,17 @@ const pairKeys=Object.keys(ALL).sort();
 pairSelect.innerHTML = pairKeys.map(p=>`<option value="${p}">${p}</option>`).join('');
 if(!pairKeys.includes(currentPair) && pairKeys.length) currentPair=pairKeys[0];
 pairSelect.value=currentPair;
-pairSelect.onchange=()=>{currentPair=pairSelect.value; renderPairBoard(); render(currentTf,strictMode)};
+pairSelect.onchange=()=>{currentPair=pairSelect.value; renderPairBoard(); render(currentTf,strictMode); renderBacktestBoard(btYear.value, btTrailing.checked); renderBacktestDetail(btYear.value, btTrailing.checked)};
+
+tabAnalysis.onclick=()=>{tabAnalysis.classList.add('active');tabBacktest.classList.remove('active');analysisView.classList.remove('hidden');backtestView.classList.add('hidden');};
+tabBacktest.onclick=()=>{tabBacktest.classList.add('active');tabAnalysis.classList.remove('active');backtestView.classList.remove('hidden');analysisView.classList.add('hidden');renderBacktestBoard(btYear.value, btTrailing.checked);renderBacktestDetail(btYear.value, btTrailing.checked);};
+
+btRun.onclick=()=>{renderBacktestBoard(btYear.value, btTrailing.checked);renderBacktestDetail(btYear.value, btTrailing.checked);};
 
 renderPairBoard();
 render('D1', false);
+renderBacktestBoard(btYear.value, btTrailing.checked);
+renderBacktestDetail(btYear.value, btTrailing.checked);
 </script>
 </body>
 </html>
