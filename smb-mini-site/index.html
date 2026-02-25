@@ -115,46 +115,71 @@ function structure(data){
   return {S,events,trend};
 }
 
-function classify(data,trend,events,S){
+function latestWeekContext(d1data){
+  const wk = d1data.slice(-5);
+  const wHigh = Math.max(...wk.map(x=>x.high));
+  const wLow = Math.min(...wk.map(x=>x.low));
+  const close = wk[wk.length-1].close;
+  const range = wHigh-wLow;
+  const closePct = ((close-wLow)/range)*100;
+  const fib618 = wLow + 0.618*range;
+  return {wk,wHigh,wLow,close,range,closePct,fib618};
+}
+
+function classify(data,trend,events,S,isH4=false){
   const last = events.slice(-1)[0];
   const recent = events.slice(-4);
   const up = recent.filter(e=>e.label.includes('↑')).length;
   const down = recent.filter(e=>e.label.includes('↓')).length;
   const momentum = (data[data.length-1].close - data[Math.max(0,data.length-6)].close) * 10000;
 
-  // Lokale structuur (laatste swing highs/lows)
-  const h2 = S.highs.slice(-2);
-  const l2 = S.lows.slice(-2);
+  const h2 = S.highs.slice(-2), l2=S.lows.slice(-2);
   const localLH = h2.length===2 ? h2[1].price < h2[0].price : false;
   const localLL = l2.length===2 ? l2[1].price < l2[0].price : false;
   const localHH = h2.length===2 ? h2[1].price > h2[0].price : false;
   const localHL = l2.length===2 ? l2[1].price > l2[0].price : false;
 
-  let pattern='RANGE / ONBESLIST';
-  if(last && last.label.startsWith('CHoCH')) pattern='REVERSAL RISK';
-  if((trend==='bull' && up>=down+2) || (trend==='bear' && down>=up+2)) pattern='CONTINUATION';
+  const W = latestWeekContext(d1);
+  const nearWeeklyLow = Math.abs(W.close-W.wLow)*10000 <= 50;
+  const inLowerThird = W.closePct <= 33.33;
 
-  // Override met lokale structuur als die duidelijk tegengesteld is
+  let pattern='RANGE / ONBESLIST';
   let regime = trend.toUpperCase();
   let localState = 'MIXED';
-  if(localLH && localLL){ localState='BEARISH (LH+LL)'; if(trend==='bull') pattern='PULLBACK / MOGELIJKE REVERSAL'; }
-  if(localHH && localHL){ localState='BULLISH (HH+HL)'; if(trend==='bear') pattern='PULLBACK / MOGELIJKE REVERSAL'; }
+
+  if(localLH && localLL){ localState='BEARISH (LH+LL)'; pattern='CONTINUATION (bearish pullback model)'; }
+  else if(localHH && localHL){ localState='BULLISH (HH+HL)'; pattern='CONTINUATION (bullish pullback model)'; }
+  else if(last && last.label.startsWith('CHoCH')){ pattern='REVERSAL RISK'; }
+
+  if((trend==='bull' && down>=up+2) || (trend==='bear' && up>=down+2)) pattern='PULLBACK / MOGELIJKE REVERSAL';
 
   let advice='Afblijven tot betere confirmatie.';
   let tone='warn';
-  if(localLH && localLL){ advice='Korte termijn bias SHORT/correctie: wacht op pullback naar premium + bearish confirmatie.'; tone='bad'; }
-  else if(localHH && localHL){ advice='Korte termijn bias LONG: wacht op retrace naar discount + bullish confirmatie.'; tone='good'; }
-  else if(pattern==='CONTINUATION' && trend==='bull' && momentum>0){ advice='Bias LONG: wacht op retrace naar bullish OB/FVG + LTF confirmatie.'; tone='good'; }
-  else if(pattern==='CONTINUATION' && trend==='bear' && momentum<0){ advice='Bias SHORT: wacht op pullback naar bearish OB/FVG + LTF confirmatie.'; tone='good'; }
-  else if(pattern.includes('REVERSAL')){ advice='Mogelijke omkeer: eerst extra CHoCH/BOS confirmatie op lagere TF voor entry.'; tone='bad'; }
 
-  return {pattern,advice,tone,momentum:momentum.toFixed(1),regime,localState};
+  // PDF-regels: niet verkopen op weekly low, niet kopen op weekly high
+  if(localLH && localLL && inLowerThird){
+    if(nearWeeklyLow){
+      advice=`TFD: GEEN chase short op weekly low. Wacht pullback richting ${price(W.fib618)}-${price(W.wHigh)} (Fib 61.8-100) + bearish confirmatie.`;
+      tone='warn';
+    }else{
+      advice=`TFD sell pullback: focus op reverse-zone ${price(W.fib618)}-${price(W.wHigh)} (Fib 61.8-100), pas na pattern confirmatie.`;
+      tone='good';
+    }
+  } else if(localHH && localHL && W.closePct>=66.66){
+    advice=`TFD: GEEN chase long op weekly high. Wacht diepere pullback + bullish pattern confirmatie.`;
+    tone='warn';
+  } else if(pattern.includes('REVERSAL')){
+    advice='Mogelijke omkeer: eerst M/W of H&S/iH&S bevestiging, daarna pas uitvoering op LTF.';
+    tone='bad';
+  }
+
+  return {pattern,advice,tone,momentum:momentum.toFixed(1),regime,localState,week:W,nearWeeklyLow,inLowerThird};
 }
 
 function render(tf='D1'){
   const data = tf==='D1' ? d1 : h4;
   const O=data.map(d=>d.open),H=data.map(d=>d.high),L=data.map(d=>d.low),C=data.map(d=>d.close),X=data.map(d=>d.date);
-  const st=structure(data); const gaps=fvg(data); const cl=classify(data,st.trend,st.events,st.S);
+  const st=structure(data); const gaps=fvg(data); const cl=classify(data,st.trend,st.events,st.S,tf==='H4');
 
   const avgRange=data.slice(-20).reduce((a,d)=>a+(d.high-d.low),0)/20;
   const stats=[
@@ -162,7 +187,9 @@ function render(tf='D1'){
     ['Macro trend', cl.regime],
     ['Lokale structuur', cl.localState],
     ['Pattern', cl.pattern],
-    ['Momentum (5 bars)', cl.momentum+' pips'],
+    ['Weekly close in range', cl.week.closePct.toFixed(2)+'%'],
+    ['Weekly H/L', `${price(cl.week.wHigh)} / ${price(cl.week.wLow)}`],
+    ['Fib reverse zone', `${price(cl.week.fib618)} - ${price(cl.week.wHigh)}`],
     ['Laatste close', price(C[C.length-1])],
     ['Gem. range (20)', pip(avgRange)+' pips'],
     ['BOS/CHoCH count', st.events.length],
@@ -191,6 +218,15 @@ function render(tf='D1'){
     ann.push({x:data[e.i].date,y:e.price,text:e.label,showarrow:true,arrowhead:2,ax:0,ay:e.label.includes('↑')?-22:22,font:{size:10,color:'#d4e6ff'}});
   });
 
+  // TFD referentielijnen (weekly high/low + Fib 61.8)
+  const x0 = X[Math.max(0, X.length-80)], x1 = X[X.length-1];
+  shapes.push({type:'line',x0,x1,y0:cl.week.wHigh,y1:cl.week.wHigh,line:{color:'#ffcf6b',width:1,dash:'dash'}});
+  shapes.push({type:'line',x0,x1,y0:cl.week.wLow,y1:cl.week.wLow,line:{color:'#7ce2ff',width:1,dash:'dash'}});
+  shapes.push({type:'line',x0,x1,y0:cl.week.fib618,y1:cl.week.fib618,line:{color:'#c3a6ff',width:1,dash:'dot'}});
+  ann.push({x:x1,y:cl.week.wHigh,text:'Weekly High',showarrow:false,font:{size:10,color:'#ffcf6b'},xanchor:'left',xshift:6});
+  ann.push({x:x1,y:cl.week.wLow,text:'Weekly Low',showarrow:false,font:{size:10,color:'#7ce2ff'},xanchor:'left',xshift:6});
+  ann.push({x:x1,y:cl.week.fib618,text:'Fib 61.8',showarrow:false,font:{size:10,color:'#c3a6ff'},xanchor:'left',xshift:6});
+
   const trace={type:'candlestick',x:X,open:O,high:H,low:L,close:C,name:`EURUSD ${tf}`,
     increasing:{line:{color:'#2ad08f'}},decreasing:{line:{color:'#ff6b7d'}}};
 
@@ -205,8 +241,11 @@ function render(tf='D1'){
     <div>Patroon: <span class="pill ${cl.tone}"><b>${cl.pattern}</b></span></div>
     <div>Advies: <span class="${cl.tone}"><b>${cl.advice}</b></span></div>
     <div>Macro trend: <b>${cl.regime}</b> | Lokale structuur: <b>${cl.localState}</b></div>
+    <div>Weekly context (TFD): H=<b>${price(cl.week.wHigh)}</b>, L=<b>${price(cl.week.wLow)}</b>, CloseInRange=<b>${cl.week.closePct.toFixed(2)}%</b></div>
+    <div>Reverse-zone (Fib 61.8-100): <b>${price(cl.week.fib618)} - ${price(cl.week.wHigh)}</b></div>
+    <div>Regelcheck: <b>${cl.nearWeeklyLow ? 'Niet verkopen op weekly low actief' : 'Geen weekly-low blokkade'}</b></div>
     <div>Laatste structuur-event: <b>${lastEvent?`${lastEvent.label} (${data[lastEvent.i].date})`:'geen'}</b></div>
-    <div>Execution flow: Bias → liquidity sweep → CHoCH/MSS (LTF) → retrace naar OB/FVG → entry met strak risico.</div>
+    <div>Execution flow: Bias → liquidity sweep → M/W/H&S/iH&S confirmatie → retrace in zone → entry met strak risico.</div>
     <div style="margin-top:6px" class="k">Dit is educatieve analyse, geen financieel advies.</div>`;
 
   const tbody=document.querySelector('#tbl tbody'); tbody.innerHTML='';
