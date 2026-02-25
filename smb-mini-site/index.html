@@ -37,6 +37,7 @@
       <button id="tfD1" class="active">D1 (real data)</button>
       <button id="tfH4">H4 curve (gesimuleerd)</button>
       <button id="strictBtn">Strict PDF mode: OFF</button>
+      <button id="rrBtn">RR model: 1:2</button>
     </div>
   </div>
 
@@ -278,29 +279,45 @@ function render(tf='D1', strictMode=false){
   // Extra grafische voorstelling: alleen huidige daily trend + supply/demand + TP
   const dDaily = d1;
   const stD = structure(dDaily);
+  const dCl = classify(dDaily, stD.trend, stD.events, stD.S, false, strictMode);
   const last = dDaily[dDaily.length-1];
-  const trendDir = stD.trend === 'bear' ? 'bear' : 'bull';
   const supply = stD.S.highs.slice(-1)[0];
   const demand = stD.S.lows.slice(-1)[0];
   const xD = dDaily.map(d=>d.date), oD=dDaily.map(d=>d.open), hD=dDaily.map(d=>d.high), lD=dDaily.map(d=>d.low), cD=dDaily.map(d=>d.close);
   const start = Math.max(0, dDaily.length-80);
 
-  let entry = last.close, sl = trendDir==='bear' ? (supply?.price ?? last.high) : (demand?.price ?? last.low);
-  let tp = trendDir==='bear' ? (demand?.price ?? (last.close - 0.0100)) : (supply?.price ?? (last.close + 0.0100));
-  if(trendDir==='bear' && tp>=entry) tp = entry - Math.abs(entry-sl)*1.5;
-  if(trendDir==='bull' && tp<=entry) tp = entry + Math.abs(entry-sl)*1.5;
+  let tradeSide = 'none';
+  if(dCl.localState.includes('BEARISH')) tradeSide='sell';
+  else if(dCl.localState.includes('BULLISH')) tradeSide='buy';
+
+  let entry = last.close;
+  let sl = tradeSide==='sell' ? (supply?.price ?? last.high) : (demand?.price ?? last.low);
+  const risk = Math.max(Math.abs(entry-sl), 0.0012);
+  let tp1 = tradeSide==='sell' ? entry - risk*rrMult : entry + risk*rrMult;
+  let tp2 = tradeSide==='sell' ? entry - risk*(rrMult+1) : entry + risk*(rrMult+1);
+
+  if(tradeSide==='sell' && demand?.price) tp1 = Math.min(tp1, demand.price);
+  if(tradeSide==='buy' && supply?.price) tp1 = Math.max(tp1, supply.price);
 
   const tShapes=[];
   if(supply) tShapes.push({type:'rect',x0:xD[start],x1:xD[xD.length-1],y0:supply.price-0.0008,y1:supply.price+0.0008,fillcolor:'rgba(255,107,125,0.16)',line:{color:'rgba(255,107,125,0.55)',width:1}});
   if(demand) tShapes.push({type:'rect',x0:xD[start],x1:xD[xD.length-1],y0:demand.price-0.0008,y1:demand.price+0.0008,fillcolor:'rgba(42,208,143,0.16)',line:{color:'rgba(42,208,143,0.55)',width:1}});
-  tShapes.push({type:'line',x0:xD[start],x1:xD[xD.length-1],y0:tp,y1:tp,line:{color:'#ffd166',dash:'dash',width:2}});
+  if(tradeSide!=='none'){
+    tShapes.push({type:'line',x0:xD[start],x1:xD[xD.length-1],y0:tp1,y1:tp1,line:{color:'#ffd166',dash:'dash',width:2}});
+    tShapes.push({type:'line',x0:xD[start],x1:xD[xD.length-1],y0:tp2,y1:tp2,line:{color:'#f7b500',dash:'dot',width:2}});
+  }
 
   const tAnn=[
-    {x:xD[xD.length-1],y:tp,text:`TP ${price(tp)}`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#ffd166'}},
     {x:xD[xD.length-1],y:entry,text:`Entry ${price(entry)}`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#b8cbff'}},
     {x:xD[xD.length-1],y:sl,text:`SL ${price(sl)}`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#ff9fb0'}},
-    {x:xD[Math.max(start, xD.length-25)],y:hD.slice(-20).reduce((a,b)=>Math.max(a,b),-1e9),text:`Current Daily Trend: ${trendDir.toUpperCase()}`,showarrow:false,font:{size:12,color:'#dbe7ff'}}
+    {x:xD[Math.max(start, xD.length-25)],y:hD.slice(-20).reduce((a,b)=>Math.max(a,b),-1e9),text:`Current Daily Trend: ${dCl.localState}`,showarrow:false,font:{size:12,color:'#dbe7ff'}}
   ];
+  if(tradeSide!=='none'){
+    tAnn.push({x:xD[xD.length-1],y:tp1,text:`TP1 ${price(tp1)} (RR ${rrMult.toFixed(0)}R)`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#ffd166'}});
+    tAnn.push({x:xD[xD.length-1],y:tp2,text:`TP2 ${price(tp2)} (RR ${(rrMult+1).toFixed(0)}R)`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#f7b500'}});
+  } else {
+    tAnn.push({x:xD[xD.length-1],y:last.close,text:'NO TRADE: geen duidelijke HH/HL of LH/LL',showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#ffd166'}});
+  }
 
   Plotly.newPlot('trendChart',[{type:'candlestick',x:xD.slice(start),open:oD.slice(start),high:hD.slice(start),low:lD.slice(start),close:cD.slice(start),
       increasing:{line:{color:'#2ad08f'}},decreasing:{line:{color:'#ff6b7d'}}}],{
@@ -310,11 +327,12 @@ function render(tf='D1', strictMode=false){
   },{responsive:true});
 }
 
-const bD1=document.getElementById('tfD1'), bH4=document.getElementById('tfH4'), bStrict=document.getElementById('strictBtn');
-let currentTf='D1', strictMode=false;
+const bD1=document.getElementById('tfD1'), bH4=document.getElementById('tfH4'), bStrict=document.getElementById('strictBtn'), bRR=document.getElementById('rrBtn');
+let currentTf='D1', strictMode=false, rrMult=2;
 bD1.onclick=()=>{currentTf='D1';bD1.classList.add('active');bH4.classList.remove('active');render(currentTf,strictMode)};
 bH4.onclick=()=>{currentTf='H4';bH4.classList.add('active');bD1.classList.remove('active');render(currentTf,strictMode)};
 bStrict.onclick=()=>{strictMode=!strictMode; bStrict.textContent=`Strict PDF mode: ${strictMode?'ON':'OFF'}`; bStrict.classList.toggle('active', strictMode); render(currentTf,strictMode)};
+bRR.onclick=()=>{rrMult = rrMult===2 ? 3 : 2; bRR.textContent=`RR model: 1:${rrMult}`; bRR.classList.toggle('active', rrMult===3); render(currentTf,strictMode)};
 render('D1', false);
 </script>
 </body>
