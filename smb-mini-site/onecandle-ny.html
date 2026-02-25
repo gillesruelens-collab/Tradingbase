@@ -79,7 +79,15 @@
     </div>
     <div class="row">
       <div class="card"><h3>Detail</h3><div id="btDetail"></div></div>
-      <div class="card"><h3>Laatste trades</h3><div style="max-height:350px;overflow:auto"><table id="btTable"><thead><tr><th>Date</th><th>Side</th><th>Entry</th><th>SL</th><th>TP</th><th>Result</th><th>PnL €</th><th>Equity €</th></tr></thead><tbody></tbody></table></div></div>
+      <div class="card"><h3>Laatste trades (klikbaar)</h3><div style="max-height:350px;overflow:auto"><table id="btTable"><thead><tr><th>Date</th><th>Side</th><th>Entry</th><th>SL</th><th>TP</th><th>Result</th><th>PnL €</th><th>Equity €</th></tr></thead><tbody></tbody></table></div></div>
+    </div>
+    <div class="card" style="margin-top:10px">
+      <h3 style="margin:4px 0 8px">Trade detail</h3>
+      <div id="tradeDetailText" class="k">Klik een trade in de tabel om detail te zien.</div>
+      <div class="row" style="margin-top:10px">
+        <div class="card"><h4 style="margin:4px 0 8px">Eerste candle (15m NY)</h4><div id="trade15mChart" style="height:280px"></div></div>
+        <div class="card"><h4 style="margin:4px 0 8px">1m execution (entry/exit)</h4><div id="trade1mChart" style="height:280px"></div></div>
+      </div>
     </div>
   </div>
 </div>
@@ -150,6 +158,81 @@ function resolveTrade(rows, i, t){
   return {result, exit};
 }
 
+function oneMinuteProxy(trade){
+  const ny = trade.ny;
+  const out=[];
+  const span = Math.max(Math.abs(ny.high-ny.low), 0.0006);
+  const base = ny.close;
+
+  for(let i=0;i<40;i++){
+    const ts = `09:${String(30+i).padStart(2,'0')}`;
+    const wave = Math.sin(i/4)*span*0.12;
+    const drift = trade.side==='BUY' ? i*span*0.015 : -i*span*0.015;
+    const o = base + drift + wave;
+    const c = o + (trade.side==='BUY' ? span*0.03 : -span*0.03);
+    const h = Math.max(o,c) + span*0.02;
+    const l = Math.min(o,c) - span*0.02;
+    out.push({t:ts, open:o, high:h, low:l, close:c});
+  }
+
+  const entryIdx = 12;
+  const exitIdx = 30;
+  if(out[entryIdx]){
+    out[entryIdx].open = trade.side==='BUY' ? (ny.high - span*0.03) : (ny.low + span*0.03);
+    out[entryIdx].close = trade.entry;
+    out[entryIdx].high = Math.max(out[entryIdx].open, out[entryIdx].close) + span*0.01;
+    out[entryIdx].low = Math.min(out[entryIdx].open, out[entryIdx].close) - span*0.01;
+  }
+  if(out[exitIdx]){
+    out[exitIdx].open = trade.side==='BUY' ? (trade.tp - span*0.05) : (trade.tp + span*0.05);
+    out[exitIdx].close = trade.result==='WIN' ? trade.tp : trade.sl;
+    out[exitIdx].high = Math.max(out[exitIdx].open, out[exitIdx].close) + span*0.02;
+    out[exitIdx].low = Math.min(out[exitIdx].open, out[exitIdx].close) - span*0.02;
+  }
+
+  return {candles:out, entryIdx, exitIdx};
+}
+
+function renderTradeDetail(trade){
+  if(!trade) return;
+  document.getElementById('tradeDetailText').innerHTML = `${currentPair} ${trade.date} | ${trade.side} | Entry ${price(trade.entry)} | Exit ${price(trade.exit)} | Result <b class='${trade.result==='WIN'?'good':'bad'}'>${trade.result}</b>`;
+
+  const ny = trade.ny;
+  const nyX = ['NY15'];
+  Plotly.newPlot('trade15mChart', [{
+    type:'candlestick', x:nyX, open:[ny.open], high:[ny.high], low:[ny.low], close:[ny.close],
+    increasing:{line:{color:'#2ad08f'}},decreasing:{line:{color:'#ff6b7d'}}
+  }], {
+    paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#111831',font:{color:'#dbe7ff'},margin:{l:42,r:28,t:6,b:24},showlegend:false,
+    xaxis:{gridcolor:'#1f2d5f'}, yaxis:{tickformat:'.5f',gridcolor:'#1f2d5f'},
+    shapes:[
+      {type:'line',xref:'paper',x0:0,x1:1,y0:ny.high,y1:ny.high,line:{color:'#58f3b7',width:2}},
+      {type:'line',xref:'paper',x0:0,x1:1,y0:ny.low,y1:ny.low,line:{color:'#ff8ea0',width:2}}
+    ],
+    annotations:[
+      {x:'NY15',y:ny.high,text:'High lijn',showarrow:false,yshift:12,font:{size:10,color:'#58f3b7'}},
+      {x:'NY15',y:ny.low,text:'Low lijn',showarrow:false,yshift:-12,font:{size:10,color:'#ff8ea0'}}
+    ]
+  }, {responsive:true});
+
+  const p = oneMinuteProxy(trade);
+  const x=p.candles.map(c=>c.t), o=p.candles.map(c=>c.open), h=p.candles.map(c=>c.high), l=p.candles.map(c=>c.low), c=p.candles.map(c=>c.close);
+  Plotly.newPlot('trade1mChart', [{
+    type:'candlestick',x,open:o,high:h,low:l,close:c,increasing:{line:{color:'#2ad08f'}},decreasing:{line:{color:'#ff6b7d'}}
+  }], {
+    paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#111831',font:{color:'#dbe7ff'},margin:{l:42,r:28,t:6,b:24},showlegend:false,
+    xaxis:{gridcolor:'#1f2d5f'}, yaxis:{tickformat:'.5f',gridcolor:'#1f2d5f'},
+    shapes:[
+      {type:'line',x0:x[0],x1:x[x.length-1],y0:trade.entry,y1:trade.entry,line:{color:'#9ec5ff',width:1}},
+      {type:'line',x0:x[0],x1:x[x.length-1],y0:trade.exit,y1:trade.exit,line:{color:trade.result==='WIN'?'#58f3b7':'#ff8ea0',width:1,dash:'dot'}}
+    ],
+    annotations:[
+      {x:x[p.entryIdx],y:trade.entry,text:'ENTRY',showarrow:true,arrowhead:2,ax:0,ay:-20,font:{size:10,color:'#9ec5ff'}},
+      {x:x[p.exitIdx],y:trade.exit,text:'EXIT',showarrow:true,arrowhead:2,ax:0,ay:-20,font:{size:10,color:trade.result==='WIN'?'#58f3b7':'#ff8ea0'}}
+    ]
+  }, {responsive:true});
+}
+
 function runBacktestPair(arr, year='2026', startCapital=10000, riskPct=1){
   const rows = arr.filter(r=>String(r.date).startsWith(year+'-'));
   let equity = Number(startCapital);
@@ -162,7 +245,7 @@ function runBacktestPair(arr, year='2026', startCapital=10000, riskPct=1){
     const r = t.side==='BUY' ? (out.exit-t.entry)/risk : (t.entry-out.exit)/risk;
     const pnl = equity*(Number(riskPct)/100)*r;
     equity += pnl;
-    trades.push({date:rows[i].date,side:t.side,entry:t.entry,sl:t.sl,tp:t.tp,result:out.result,pnl,equity,ny:t.ny});
+    trades.push({date:rows[i].date,side:t.side,entry:t.entry,sl:t.sl,tp:t.tp,exit:out.exit,result:out.result,pnl,equity,ny:t.ny});
   }
   const wins=trades.filter(t=>t.result==='WIN').length;
   const losses=trades.filter(t=>t.result==='LOSS').length;
@@ -257,12 +340,29 @@ function renderBacktestDetail(){
   document.getElementById('btDetail').innerHTML = `<div><b>${currentPair}</b> | Jaar ${y} | RR 1:${rr} | Risk ${risk}%</div><div style='margin-top:6px'>Wins <b class='good'>${r.wins}</b> | Losses <b class='bad'>${r.losses}</b> | Trades ${r.total}</div><div style='margin-top:6px'>Start €${r.startCapital.toFixed(2)} → End €<b>${r.endCapital.toFixed(2)}</b></div>`;
 
   const tbody=document.querySelector('#btTable tbody'); tbody.innerHTML='';
-  r.trades.slice(-120).reverse().forEach(t=>{
+  const shown = r.trades.slice(-120).reverse();
+  shown.forEach((t,idx)=>{
     const tr=document.createElement('tr');
-    tr.className = t.result==='WIN' ? 'row-win' : 'row-loss';
+    tr.className = (t.result==='WIN' ? 'row-win' : 'row-loss');
+    tr.style.cursor='pointer';
+    tr.dataset.idx=String(idx);
     tr.innerHTML=`<td>${t.date}</td><td>${t.side}</td><td>${price(t.entry)}</td><td>${price(t.sl)}</td><td>${price(t.tp)}</td><td class='${t.result==='WIN'?'good':'bad'}'><b>${t.result}</b></td><td>${t.pnl.toFixed(2)}</td><td>${t.equity.toFixed(2)}</td>`;
     tbody.appendChild(tr);
   });
+
+  tbody.onclick=(ev)=>{
+    const row = ev.target.closest('tr[data-idx]');
+    if(!row) return;
+    const t = shown[Number(row.dataset.idx)];
+    renderTradeDetail(t);
+  };
+
+  if(shown.length) renderTradeDetail(shown[0]);
+  else {
+    document.getElementById('tradeDetailText').textContent = 'Geen trades voor deze selectie.';
+    document.getElementById('trade15mChart').innerHTML='';
+    document.getElementById('trade1mChart').innerHTML='';
+  }
 }
 
 const pairSelect=document.getElementById('pairSelect');
