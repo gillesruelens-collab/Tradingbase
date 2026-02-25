@@ -238,6 +238,38 @@ function countZoneReactions(data, zLow, zHigh, side='sell'){
   return {touches,reactions};
 }
 
+function detectBearishWStrict(data, S){
+  // Strikte 5-punts structuur: H1-L1-H2-L2-H3 met LH op highs en LL op lows + neckline break
+  const piv=[...S.highs.map(p=>({...p,t:'H'})), ...S.lows.map(p=>({...p,t:'L'}))].sort((a,b)=>a.i-b.i);
+  if(piv.length < 5) return {ok:false, points:[], neckline:null};
+
+  const seq=[];
+  for(let i=0;i<piv.length;i++){
+    if(seq.length===0 || seq[seq.length-1].t!==piv[i].t) seq.push(piv[i]);
+    else {
+      // bij gelijke type: voor H neem hogere, voor L neem lagere (scherper pivot)
+      if(piv[i].t==='H' && piv[i].price>seq[seq.length-1].price) seq[seq.length-1]=piv[i];
+      if(piv[i].t==='L' && piv[i].price<seq[seq.length-1].price) seq[seq.length-1]=piv[i];
+    }
+  }
+
+  for(let i=Math.max(0,seq.length-12); i<=seq.length-5; i++){
+    const p1=seq[i], p2=seq[i+1], p3=seq[i+2], p4=seq[i+3], p5=seq[i+4];
+    if(!(p1.t==='H'&&p2.t==='L'&&p3.t==='H'&&p4.t==='L'&&p5.t==='H')) continue;
+
+    const lh = p3.price < p1.price && p5.price < p3.price;
+    const ll = p4.price < p2.price;
+    const nearEqualL = Math.abs(p4.price-p2.price)*10000 <= 35; // W-vorm maar bearish variant
+    const neckline = Math.min(p2.price,p4.price);
+    const broke = data.slice(p5.i+1).some(c=>c.close < neckline);
+
+    if(lh && (ll || nearEqualL) && broke){
+      return {ok:true, points:[p1,p2,p3,p4,p5], neckline};
+    }
+  }
+  return {ok:false, points:[], neckline:null};
+}
+
 function render(tf='D1', strictMode=false){
   const data = tf==='D1' ? d1 : h4;
   const O=data.map(d=>d.open),H=data.map(d=>d.high),L=data.map(d=>d.low),C=data.map(d=>d.close),X=data.map(d=>d.date);
@@ -367,15 +399,14 @@ function render(tf='D1', strictMode=false){
     tShapes.push({type:'line',x0:xD[start],x1:xD[xD.length-1],y0:tp2,y1:tp2,line:{color:'#f7b500',dash:'dot',width:2}});
   }
 
-  // Simpele bearish-W tekening met laatste 5 swing-pivots
-  if(tradeSide==='sell'){
-    const piv=[...stD.S.highs.slice(-3).map(p=>({...p,t:'H'})), ...stD.S.lows.slice(-3).map(p=>({...p,t:'L'}))]
-      .sort((a,b)=>a.i-b.i)
-      .slice(-5);
-    for(let k=1;k<piv.length;k++){
-      const a=piv[k-1], b=piv[k];
+  // Strikte bearish-W tekening (5 punten + neckline break)
+  const bW = detectBearishWStrict(dDaily, stD.S);
+  if(tradeSide==='sell' && bW.ok){
+    for(let k=1;k<bW.points.length;k++){
+      const a=bW.points[k-1], b=bW.points[k];
       tShapes.push({type:'line',x0:dDaily[a.i].date,x1:dDaily[b.i].date,y0:a.price,y1:b.price,line:{color:'#ff9fb0',width:2}});
     }
+    tShapes.push({type:'line',x0:dDaily[bW.points[0].i].date,x1:dDaily[dDaily.length-1].date,y0:bW.neckline,y1:bW.neckline,line:{color:'#ff9fb0',dash:'dot',width:1}});
   }
 
   const tAnn=[
@@ -387,7 +418,7 @@ function render(tf='D1', strictMode=false){
     tAnn.push({x:xD[xD.length-1],y:activeZone.high,text:`${activeZone.name} Fib(61.8-100): ${price(activeZone.low)}-${price(activeZone.high)} | reacts ${activeZone.rx.reactions}/${activeZone.rx.touches}`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:tradeSide==='sell'?'#ffb3bf':'#8df0c9'}});
   }
   if(tradeSide==='sell'){
-    tAnn.push({x:xD[xD.length-1],y:hD.slice(-20).reduce((a,b)=>Math.max(a,b),-1e9)-0.0005,text:'Bearish W (schematisch)',showarrow:false,xanchor:'right',font:{size:10,color:'#ff9fb0'}});
+    tAnn.push({x:xD[xD.length-1],y:hD.slice(-20).reduce((a,b)=>Math.max(a,b),-1e9)-0.0005,text:bW.ok?'Bearish W (strict, neckline break)':'Bearish W strict: niet bevestigd',showarrow:false,xanchor:'right',font:{size:10,color:'#ff9fb0'}});
   }
   if(tradeSide!=='none'){
     tAnn.push({x:xD[xD.length-1],y:tp1,text:`TP1 ${price(tp1)} (RR ${rrMult.toFixed(0)}R)`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#ffd166'}});
