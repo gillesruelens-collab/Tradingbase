@@ -26,6 +26,8 @@
     .k{font-size:12px;color:var(--muted)} .v{font-size:20px;font-weight:700}
     #chart{height:65vh;min-height:500px;background:var(--card);border:1px solid var(--line);border-radius:12px}
     .row{display:grid;grid-template-columns:2fr 1fr;gap:10px;margin-top:10px}
+    .chartRow{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+    .chartRow .card{min-width:0}
     .pill{display:inline-block;padding:4px 9px;border-radius:999px;font-size:12px;background:#1a254d}
     .good{color:#58f3b7}.bad{color:#ff8ea0}.warn{color:#ffd77a}
     table{width:100%;border-collapse:collapse;font-size:12px}
@@ -34,7 +36,7 @@
     .row-win{background:rgba(42,208,143,0.22)} .row-loss{background:rgba(255,107,125,0.22)} .row-be{background:rgba(255,215,122,0.24)}
     .clickable-row{cursor:pointer}
     .res-win{color:#58f3b7;font-weight:700}.res-loss{color:#ff8ea0;font-weight:700}.res-be{color:#ffd77a;font-weight:700}
-    @media(max-width:980px){.grid{grid-template-columns:1fr 1fr}.row{grid-template-columns:1fr}}
+    @media(max-width:980px){.grid{grid-template-columns:1fr 1fr}.row{grid-template-columns:1fr}.chartRow{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -110,9 +112,9 @@
     <div class="card" style="margin-top:10px">
       <h3>Trade detail (klik een rij)</h3>
       <div id="btTradeDetail" class="k">Nog geen trade geselecteerd.</div>
-      <div class="row" style="margin-top:10px">
-        <div class="card"><h4 style="margin:4px 0 8px">Daily context</h4><div id="btDailyChart" style="height:300px"></div></div>
-        <div class="card"><h4 style="margin:4px 0 8px">H4 execution</h4><div id="btH4Chart" style="height:300px"></div></div>
+      <div class="chartRow" style="margin-top:10px">
+        <div class="card"><h4 style="margin:4px 0 8px">Daily context</h4><div id="btDailyChart" style="height:300px;width:100%"></div></div>
+        <div class="card"><h4 style="margin:4px 0 8px">H4 execution</h4><div id="btH4Chart" style="height:300px;width:100%"></div></div>
       </div>
     </div>
   </div>
@@ -553,7 +555,7 @@ function runBacktestForPair(arr, year='2026', trailing=false, startCapital=10000
     const risk = Math.max(Math.abs(entry-sl), 0.0020);
     const tp = side==='SELL' ? entry - 2*risk : entry + 2*risk;
 
-    let result='LOSS', slLive=sl, exitPrice=null;
+    let result='LOSS', slLive=sl, exitPrice=null, exitDate=rows[Math.min(rows.length-1, i+11)].date;
     for(let j=i+1;j<Math.min(rows.length,i+12);j++){
       const b=rows[j];
       const up = ((b.high-entry)/entry)*100;
@@ -568,15 +570,17 @@ function runBacktestForPair(arr, year='2026', trailing=false, startCapital=10000
         }
       }
       if(side==='BUY'){
-        if(b.low<=slLive){ exitPrice=slLive; result = slLive===entry ? 'BE' : (slLive>entry ? 'WIN-TS' : 'LOSS'); break; }
-        if(b.high>=tp){ exitPrice=tp; result='WIN'; break; }
+        if(b.low<=slLive){ exitPrice=slLive; exitDate=b.date; result = slLive===entry ? 'BE' : (slLive>entry ? 'WIN-TS' : 'LOSS'); break; }
+        if(b.high>=tp){ exitPrice=tp; exitDate=b.date; result='WIN'; break; }
       } else {
-        if(b.high>=slLive){ exitPrice=slLive; result = slLive===entry ? 'BE' : (slLive<entry ? 'WIN-TS' : 'LOSS'); break; }
-        if(b.low<=tp){ exitPrice=tp; result='WIN'; break; }
+        if(b.high>=slLive){ exitPrice=slLive; exitDate=b.date; result = slLive===entry ? 'BE' : (slLive<entry ? 'WIN-TS' : 'LOSS'); break; }
+        if(b.low<=tp){ exitPrice=tp; exitDate=b.date; result='WIN'; break; }
       }
     }
     if(exitPrice===null){
-      exitPrice = rows[Math.min(rows.length-1, i+11)].close;
+      const outBar = rows[Math.min(rows.length-1, i+11)];
+      exitPrice = outBar.close;
+      exitDate = outBar.date;
       result = 'LOSS';
     }
 
@@ -585,7 +589,7 @@ function runBacktestForPair(arr, year='2026', trailing=false, startCapital=10000
     const pnl = riskMoney * rMultiple;
     equity += pnl;
 
-    trades.push({date:rows[i].date,side,entry,sl,tp,result,r:rMultiple,pnl,equity,trigger,zone:`${price(zone.low)}-${price(zone.high)}`});
+    trades.push({date:rows[i].date,side,entry,sl,tp,result,r:rMultiple,pnl,equity,trigger,zone:`${price(zone.low)}-${price(zone.high)}`,exitPrice,exitDate});
   }
   const wins = trades.filter(t=>t.result.startsWith('WIN')).length;
   const losses = trades.filter(t=>t.result==='LOSS').length;
@@ -623,7 +627,18 @@ function renderTradeCharts(trade){
     {type:'line',x0:hx[0],x1:hx[hx.length-1],y0:trade.sl,y1:trade.sl,line:{color:'#ff8ea0',width:1,dash:'dot'}},
     {type:'line',x0:hx[0],x1:hx[hx.length-1],y0:trade.tp,y1:trade.tp,line:{color:'#ffd77a',width:1,dash:'dash'}}
   ];
-  Plotly.newPlot('btH4Chart',[{type:'candlestick',x:hx,open:ho,high:hh,low:hl,close:hc,increasing:{line:{color:'#2ad08f'}},decreasing:{line:{color:'#ff6b7d'}}}],{
+  const entryX = hx.find(v=>String(v).startsWith(trade.date)) || hx[Math.floor(hx.length*0.35)] || hx[0];
+  const exitX = [...hx].reverse().find(v=>String(v).startsWith(trade.exitDate||trade.date)) || hx[Math.floor(hx.length*0.75)] || hx[hx.length-1];
+  const markerTrace = {
+    type:'scatter',mode:'markers+text',
+    x:[entryX, exitX],y:[trade.entry, trade.exitPrice||trade.entry],
+    marker:{size:[12,12],symbol:['circle','diamond'],color:['#58f3b7', trade.result==='LOSS'?'#ff8ea0':(trade.result==='BE'?'#ffd77a':'#58f3b7')]},
+    text:['ENTRY','EXIT'],textposition:'top center',textfont:{size:10,color:'#dbe7ff'},hoverinfo:'skip'
+  };
+  Plotly.newPlot('btH4Chart',[
+    {type:'candlestick',x:hx,open:ho,high:hh,low:hl,close:hc,increasing:{line:{color:'#2ad08f'}},decreasing:{line:{color:'#ff6b7d'}}},
+    markerTrace
+  ],{
     paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#111831',font:{color:'#dbe7ff'},margin:{l:42,r:24,t:8,b:28},
     xaxis:{rangeslider:{visible:false},gridcolor:'#1f2d5f'},yaxis:{tickformat:'.5f',gridcolor:'#1f2d5f'},shapes:hShapes,
     annotations:[{x:hx[Math.floor(hx.length*0.65)]||hx[0],y:trade.entry,text:'Entry/SL/TP',showarrow:false,font:{size:10,color:'#b8cbff'}}]
