@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SMB Mini Site – EURUSD</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <script src="./data/eurusd_data.js"></script>
+  <style>
+    :root{--bg:#0b1020;--card:#111831;--muted:#9fb0d0;--txt:#eaf0ff;--up:#2ad08f;--down:#ff6b7d;--acc:#67b7ff;}
+    body{margin:0;font-family:Inter,system-ui,Arial;background:var(--bg);color:var(--txt)}
+    .wrap{max-width:1300px;margin:0 auto;padding:18px}
+    h1,h2{margin:8px 0 10px}
+    .grid{display:grid;gap:12px;grid-template-columns:repeat(4,minmax(170px,1fr));margin:12px 0}
+    .card{background:var(--card);border:1px solid #1d2751;border-radius:14px;padding:12px}
+    .k{font-size:12px;color:var(--muted)} .v{font-size:20px;font-weight:700}
+    #chart{height:66vh;min-height:520px;background:var(--card);border:1px solid #1d2751;border-radius:14px}
+    .row{display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-top:12px}
+    table{width:100%;border-collapse:collapse;font-size:12px}
+    th,td{padding:6px;border-bottom:1px solid #1d2751;text-align:right}
+    th:first-child,td:first-child{text-align:left}
+    .pill{display:inline-block;padding:3px 8px;border-radius:20px;font-size:11px;background:#1a254d;color:#b8cbff}
+    @media(max-width:960px){.grid{grid-template-columns:1fr 1fr}.row{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📈 SMB Visual – EURUSD (D1)</h1>
+  <div class="k">Data cutoff: <b>21/02/2026</b> (laatste beschikbare candle: 20/02/2026)</div>
+
+  <div class="grid" id="stats"></div>
+  <div id="chart"></div>
+
+  <div class="row">
+    <div class="card">
+      <h2>SMB Interpretatie (automatisch)</h2>
+      <div id="notes" style="line-height:1.6;color:#cfe0ff"></div>
+    </div>
+    <div class="card">
+      <h2>Laatste 20 Candles</h2>
+      <div style="max-height:360px;overflow:auto">
+        <table id="tbl"><thead><tr><th>Datum</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Range (pips)</th></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const data = window.EURUSD_DATA || [];
+const x = data.map(d=>d.date), o=data.map(d=>d.open), h=data.map(d=>d.high), l=data.map(d=>d.low), c=data.map(d=>d.close);
+
+function pip(v){return (v*10000).toFixed(1)}
+function price(v){return v.toFixed(5)}
+
+function getSwings(len=2){
+  const highs=[], lows=[];
+  for(let i=len;i<data.length-len;i++){
+    let sh=true, sl=true;
+    for(let j=i-len;j<=i+len;j++){
+      if(j===i) continue;
+      if(data[i].high<=data[j].high) sh=false;
+      if(data[i].low>=data[j].low) sl=false;
+    }
+    if(sh) highs.push({i,price:data[i].high,date:data[i].date});
+    if(sl) lows.push({i,price:data[i].low,date:data[i].date});
+  }
+  return {highs,lows};
+}
+
+function detectFVG(){
+  const bullish=[], bearish=[];
+  for(let i=2;i<data.length;i++){
+    if(data[i].low > data[i-2].high){ bullish.push({i,from:data[i-2].high,to:data[i].low,type:'bull'}); }
+    if(data[i].high < data[i-2].low){ bearish.push({i,from:data[i].high,to:data[i-2].low,type:'bear'}); }
+  }
+  return {bullish,bearish};
+}
+
+function detectEqualHL(tolPips=8){
+  const {highs,lows}=getSwings(2);
+  const eqh=[], eql=[];
+  for(let i=1;i<highs.length;i++) if(Math.abs(highs[i].price-highs[i-1].price)*10000<=tolPips) eqh.push([highs[i-1],highs[i]]);
+  for(let i=1;i<lows.length;i++) if(Math.abs(lows[i].price-lows[i-1].price)*10000<=tolPips) eql.push([lows[i-1],lows[i]]);
+  return {eqh,eql,highs,lows};
+}
+
+const S = detectEqualHL(8);
+const F = detectFVG();
+
+// BOS/CHoCH simplified using swing breaks by close
+const events=[];
+let trend='range';
+for(let i=5;i<data.length;i++){
+  const prevHigh = S.highs.filter(s=>s.i<i).slice(-1)[0];
+  const prevLow = S.lows.filter(s=>s.i<i).slice(-1)[0];
+  if(prevHigh && data[i].close > prevHigh.price){
+    const t = (trend==='bear') ? 'CHoCH ↑' : 'BOS ↑';
+    events.push({i,label:t,price:data[i].high}); trend='bull';
+  }
+  if(prevLow && data[i].close < prevLow.price){
+    const t = (trend==='bull') ? 'CHoCH ↓' : 'BOS ↓';
+    events.push({i,label:t,price:data[i].low}); trend='bear';
+  }
+}
+
+const lastClose = c[c.length-1], prevClose=c[c.length-2];
+const ytdChange = ((lastClose-o[0])/o[0]*100).toFixed(2);
+const avgRange = data.slice(-20).reduce((a,d)=>a+(d.high-d.low),0)/20;
+
+const stats=[
+  ['Laatste close', price(lastClose)],
+  ['Laatste dag range', pip(h[h.length-1]-l[l.length-1])+' pips'],
+  ['Gem. range (20d)', pip(avgRange)+' pips'],
+  ['Richting vs vorige close', ((lastClose-prevClose)*10000).toFixed(1)+' pips'],
+  ['Periode return', ytdChange+'%'],
+  ['Trend status', trend.toUpperCase()],
+  ['Detected BOS/CHoCH', events.length],
+  ['Detected FVG', F.bullish.length + F.bearish.length]
+];
+
+document.getElementById('stats').innerHTML = stats.map(([k,v])=>`<div class='card'><div class='k'>${k}</div><div class='v'>${v}</div></div>`).join('');
+
+const shapes=[]; const ann=[];
+
+// equal highs/lows liquidity
+S.eqh.slice(-4).forEach(([a,b])=>{
+  shapes.push({type:'line',x0:a.date,x1:b.date,y0:a.price,y1:b.price,line:{color:'#ffd166',dash:'dot',width:2}});
+  ann.push({x:b.date,y:b.price,text:'EQH',showarrow:false,font:{color:'#ffd166',size:10},yshift:10});
+});
+S.eql.slice(-4).forEach(([a,b])=>{
+  shapes.push({type:'line',x0:a.date,x1:b.date,y0:a.price,y1:b.price,line:{color:'#a0e7e5',dash:'dot',width:2}});
+  ann.push({x:b.date,y:b.price,text:'EQL',showarrow:false,font:{color:'#a0e7e5',size:10},yshift:-10});
+});
+
+// FVG boxes (last 6)
+[...F.bullish.slice(-3), ...F.bearish.slice(-3)].forEach(z=>{
+  shapes.push({type:'rect',x0:data[Math.max(0,z.i-1)].date,x1:data[Math.min(data.length-1,z.i+4)].date,y0:Math.min(z.from,z.to),y1:Math.max(z.from,z.to),fillcolor:z.type==='bull'?'rgba(42,208,143,0.18)':'rgba(255,107,125,0.18)',line:{width:0}})
+});
+
+// order blocks approximation: candle before each BOS/CHoCH
+events.slice(-10).forEach(e=>{
+  const j=Math.max(0,e.i-1), d=data[j];
+  shapes.push({type:'rect',x0:d.date,x1:data[Math.min(j+2,data.length-1)].date,y0:d.low,y1:d.high,fillcolor:'rgba(103,183,255,0.15)',line:{color:'rgba(103,183,255,0.45)',width:1}});
+  ann.push({x:data[e.i].date,y:e.price,text:e.label,showarrow:true,arrowhead:2,ax:0,ay:e.label.includes('↑')?-24:24,font:{size:10,color:'#d4e6ff'}})
+});
+
+const trace={type:'candlestick',x,open:o,high:h,low:l,close:c,increasing:{line:{color:'#2ad08f'}},decreasing:{line:{color:'#ff6b7d'}},name:'EURUSD D1'};
+
+Plotly.newPlot('chart',[trace],{
+  paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#111831',font:{color:'#dbe7ff'},
+  margin:{l:50,r:20,t:20,b:40},xaxis:{rangeslider:{visible:false},gridcolor:'#1f2d5f'},yaxis:{tickformat:'.5f',gridcolor:'#1f2d5f'},
+  shapes,annotations:ann,showlegend:false
+},{responsive:true});
+
+// notes
+const lastEvent = events[events.length-1];
+const notes = [
+  `• Marktschema: <span class='pill'>${trend.toUpperCase()}</span> op basis van laatste swing breaks (SMB proxy).`,
+  `• Laatste structure event: <span class='pill'>${lastEvent?`${lastEvent.label} op ${data[lastEvent.i].date}`:'geen recente event'}</span>.`,
+  `• Liquidity: equal highs/lows zijn aangeduid als EQH/EQL (gestippelde lijnen).`,
+  `• FVG-zones: groene/rode transparante blokken tonen inefficiënties (3-candle model).`,
+  `• Order blocks: blauwe blokken zijn benaderde OB's (candle vóór BOS/CHoCH).`,
+  `• Setup-model EURUSD: Bias (D1) → Liquidity sweep (H4/H1) → CHoCH/MSS → retrace in OB/FVG → execution met strak risico.`
+];
+document.getElementById('notes').innerHTML = notes.join('<br>');
+
+// candle table
+const tbody=document.querySelector('#tbl tbody');
+data.slice(-20).reverse().forEach(d=>{
+  const tr=document.createElement('tr');
+  tr.innerHTML=`<td>${d.date}</td><td>${price(d.open)}</td><td>${price(d.high)}</td><td>${price(d.low)}</td><td>${price(d.close)}</td><td>${pip(d.high-d.low)}</td>`;
+  tbody.appendChild(tr);
+});
+</script>
+</body>
+</html>
