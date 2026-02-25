@@ -110,6 +110,10 @@
     <div class="card" style="margin-top:10px">
       <h3>Trade detail (klik een rij)</h3>
       <div id="btTradeDetail" class="k">Nog geen trade geselecteerd.</div>
+      <div class="row" style="margin-top:10px">
+        <div class="card"><h4 style="margin:4px 0 8px">Daily context</h4><div id="btDailyChart" style="height:300px"></div></div>
+        <div class="card"><h4 style="margin:4px 0 8px">H4 execution</h4><div id="btH4Chart" style="height:300px"></div></div>
+      </div>
     </div>
   </div>
 </div>
@@ -589,6 +593,43 @@ function runBacktestForPair(arr, year='2026', trailing=false, startCapital=10000
   return {wins,losses,be,trades,total:trades.length,startCapital:Number(startCapital),endCapital:equity};
 }
 
+function renderTradeCharts(trade){
+  const arr = ALL[currentPair] || [];
+  if(!arr.length) return;
+  const idx = arr.findIndex(x=>x.date===trade.date);
+  if(idx<0) return;
+
+  // Daily chart rond trade datum
+  const dStart=Math.max(0, idx-35), dEnd=Math.min(arr.length, idx+20);
+  const d=arr.slice(dStart,dEnd);
+  const x=d.map(a=>a.date), o=d.map(a=>a.open), h=d.map(a=>a.high), l=d.map(a=>a.low), c=d.map(a=>a.close);
+  const dShapes=[
+    {type:'line',x0:x[0],x1:x[x.length-1],y0:trade.entry,y1:trade.entry,line:{color:'#9ec5ff',width:1}},
+    {type:'line',x0:x[0],x1:x[x.length-1],y0:trade.sl,y1:trade.sl,line:{color:'#ff8ea0',width:1,dash:'dot'}},
+    {type:'line',x0:x[0],x1:x[x.length-1],y0:trade.tp,y1:trade.tp,line:{color:'#ffd77a',width:1,dash:'dash'}}
+  ];
+
+  Plotly.newPlot('btDailyChart',[{type:'candlestick',x,open:o,high:h,low:l,close:c,increasing:{line:{color:'#2ad08f'}},decreasing:{line:{color:'#ff6b7d'}}}],{
+    paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#111831',font:{color:'#dbe7ff'},margin:{l:42,r:24,t:8,b:28},
+    xaxis:{rangeslider:{visible:false},gridcolor:'#1f2d5f'},yaxis:{tickformat:'.5f',gridcolor:'#1f2d5f'},shapes:dShapes,
+    annotations:[{x:trade.date,y:trade.entry,text:'Entry day',showarrow:true,arrowhead:2,ax:0,ay:-18,font:{size:10,color:'#b8cbff'}}]
+  },{responsive:true});
+
+  // H4 execution rond trade dag (synthetic H4)
+  const h4All = toH4Synthetic(arr.slice(Math.max(0,idx-10), Math.min(arr.length, idx+6)));
+  const hx=h4All.map(a=>a.date), ho=h4All.map(a=>a.open), hh=h4All.map(a=>a.high), hl=h4All.map(a=>a.low), hc=h4All.map(a=>a.close);
+  const hShapes=[
+    {type:'line',x0:hx[0],x1:hx[hx.length-1],y0:trade.entry,y1:trade.entry,line:{color:'#9ec5ff',width:1}},
+    {type:'line',x0:hx[0],x1:hx[hx.length-1],y0:trade.sl,y1:trade.sl,line:{color:'#ff8ea0',width:1,dash:'dot'}},
+    {type:'line',x0:hx[0],x1:hx[hx.length-1],y0:trade.tp,y1:trade.tp,line:{color:'#ffd77a',width:1,dash:'dash'}}
+  ];
+  Plotly.newPlot('btH4Chart',[{type:'candlestick',x:hx,open:ho,high:hh,low:hl,close:hc,increasing:{line:{color:'#2ad08f'}},decreasing:{line:{color:'#ff6b7d'}}}],{
+    paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#111831',font:{color:'#dbe7ff'},margin:{l:42,r:24,t:8,b:28},
+    xaxis:{rangeslider:{visible:false},gridcolor:'#1f2d5f'},yaxis:{tickformat:'.5f',gridcolor:'#1f2d5f'},shapes:hShapes,
+    annotations:[{x:hx[Math.floor(hx.length*0.65)]||hx[0],y:trade.entry,text:'Entry/SL/TP',showarrow:false,font:{size:10,color:'#b8cbff'}}]
+  },{responsive:true});
+}
+
 function renderBacktestBoard(year, trailing, startCapital, riskPct){
   const btBoard=document.getElementById('btBoard');
   const keys=Object.keys(ALL).sort();
@@ -623,7 +664,15 @@ function renderBacktestDetail(year, trailing, startCapital, riskPct){
     const t = r.trades[Number(row.dataset.idx)];
     if(!t) return;
     detail.innerHTML = `<div><b>${currentPair}</b> | ${t.date} | ${t.side} | Resultaat: <b>${t.result}</b></div><div style='margin-top:6px'>Trigger: ${t.trigger}</div><div style='margin-top:6px'>Zone: ${t.zone} | Entry ${price(t.entry)} | SL ${price(t.sl)} | TP ${price(t.tp)}</div><div style='margin-top:6px'>PnL: <b>€${t.pnl.toFixed(2)}</b> | Equity na trade: <b>€${t.equity.toFixed(2)}</b></div>`;
+    renderTradeCharts(t);
   };
+
+  if(r.trades.length){
+    renderTradeCharts(r.trades[0]);
+  } else {
+    document.getElementById('btDailyChart').innerHTML='';
+    document.getElementById('btH4Chart').innerHTML='';
+  }
 }
 
 function renderPairBoard(){
