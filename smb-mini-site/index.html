@@ -553,7 +553,11 @@ function runBacktestForPair(arr, year='2026', trailing=false, startCapital=10000
 
     const sl = side==='SELL' ? zone.high + 0.0015 : zone.low - 0.0015;
     const risk = Math.max(Math.abs(entry-sl), 0.0020);
-    const tp = side==='SELL' ? entry - 2*risk : entry + 2*risk;
+    // TP volgens jouw regel: Daily Fib completion -27
+    const tpFibDaily = side==='SELL'
+      ? (zones.low - 0.27*zones.range)
+      : (zones.high + 0.27*zones.range);
+    const tp = tpFibDaily;
 
     let result='LOSS', slLive=sl, exitPrice=null, exitDate=rows[Math.min(rows.length-1, i+11)].date;
     for(let j=i+1;j<Math.min(rows.length,i+12);j++){
