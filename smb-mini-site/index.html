@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SMB Mini Site – EURUSD</title>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-  <script src="./data/eurusd_data.js"></script>
+  <script src="./data/forex_data.js"></script>
   <style>
     :root{--bg:#0b1020;--card:#111831;--line:#1d2751;--muted:#9fb0d0;--txt:#eaf0ff;--up:#2ad08f;--down:#ff6b7d}
     body{margin:0;font-family:Inter,system-ui,Arial;background:var(--bg);color:var(--txt)}
@@ -30,10 +30,13 @@
 <div class="wrap">
   <div class="top">
     <div>
-      <h1 style="margin:6px 0">📈 SMB Visual – EURUSD</h1>
-      <div class="k">Cutoff: <b>21/02/2026</b> | laatste beschikbare candle: <b>20/02/2026</b></div>
+      <h1 style="margin:6px 0">📈 SMB Visual – FX Pairs</h1>
+      <div class="k">Cutoff: <b>21/02/2026</b> | <span id="pairLabel">EURUSD</span></div>
     </div>
     <div class="btns">
+      <select id="pairSelect" style="background:#1a254d;color:#dbe7ff;border:1px solid #304084;border-radius:10px;padding:7px 10px;margin-right:6px">
+        <option>EURUSD</option><option>GBPUSD</option><option>USDJPY</option><option>AUDUSD</option><option>USDCAD</option><option>USDCHF</option>
+      </select>
       <button id="tfD1" class="active">D1 (real data)</button>
       <button id="tfH4">H4 curve (gesimuleerd)</button>
       <button id="strictBtn">Strict PDF mode: OFF</button>
@@ -62,7 +65,9 @@
 </div>
 
 <script>
-const d1 = window.EURUSD_DATA || [];
+const ALL = window.FOREX_DATA || {};
+let currentPair = 'EURUSD';
+let d1 = ALL[currentPair] || [];
 
 function toH4Synthetic(days){
   const out=[];
@@ -81,7 +86,7 @@ function toH4Synthetic(days){
   return out;
 }
 
-const h4 = toH4Synthetic(d1);
+// H4 wordt per geselecteerde pair dynamisch opgebouwd
 
 function pip(v){return (v*10000).toFixed(1)}
 function price(v){return v.toFixed(5)}
@@ -271,10 +276,13 @@ function detectBearishWStrict(data, S){
 }
 
 function render(tf='D1', strictMode=false){
-  const data = tf==='D1' ? d1 : h4;
+  d1 = ALL[currentPair] || [];
+  const h4Local = toH4Synthetic(d1);
+  const data = tf==='D1' ? d1 : h4Local;
   const O=data.map(d=>d.open),H=data.map(d=>d.high),L=data.map(d=>d.low),C=data.map(d=>d.close),X=data.map(d=>d.date);
   const st=structure(data); const gaps=fvg(data); const cl=classify(data,st.trend,st.events,st.S,tf==='H4',strictMode);
 
+  document.getElementById('pairLabel').textContent = `${currentPair} (laatste candle: ${d1[d1.length-1]?.date || '-'})`;
   const avgRange=data.slice(-20).reduce((a,d)=>a+(d.high-d.low),0)/20;
   const stats=[
     ['Timeframe', tf],
@@ -322,7 +330,7 @@ function render(tf='D1', strictMode=false){
   ann.push({x:x1,y:cl.week.wLow,text:'Weekly Low',showarrow:false,font:{size:10,color:'#7ce2ff'},xanchor:'left',xshift:6});
   ann.push({x:x1,y:cl.week.fib618,text:'Fib 61.8',showarrow:false,font:{size:10,color:'#c3a6ff'},xanchor:'left',xshift:6});
 
-  const trace={type:'candlestick',x:X,open:O,high:H,low:L,close:C,name:`EURUSD ${tf}`,
+  const trace={type:'candlestick',x:X,open:O,high:H,low:L,close:C,name:`${currentPair} ${tf}`,
     increasing:{line:{color:'#2ad08f'}},decreasing:{line:{color:'#ff6b7d'}}};
 
   Plotly.newPlot('chart',[trace],{
@@ -435,12 +443,14 @@ function render(tf='D1', strictMode=false){
   },{responsive:true});
 }
 
+const pairSelect=document.getElementById('pairSelect');
 const bD1=document.getElementById('tfD1'), bH4=document.getElementById('tfH4'), bStrict=document.getElementById('strictBtn'), bRR=document.getElementById('rrBtn');
 let currentTf='D1', strictMode=false, rrMult=2;
 bD1.onclick=()=>{currentTf='D1';bD1.classList.add('active');bH4.classList.remove('active');render(currentTf,strictMode)};
 bH4.onclick=()=>{currentTf='H4';bH4.classList.add('active');bD1.classList.remove('active');render(currentTf,strictMode)};
 bStrict.onclick=()=>{strictMode=!strictMode; bStrict.textContent=`Strict PDF mode: ${strictMode?'ON':'OFF'}`; bStrict.classList.toggle('active', strictMode); render(currentTf,strictMode)};
 bRR.onclick=()=>{rrMult = rrMult===2 ? 3 : 2; bRR.textContent=`RR model: 1:${rrMult}`; bRR.classList.toggle('active', rrMult===3); render(currentTf,strictMode)};
+pairSelect.onchange=()=>{currentPair=pairSelect.value; render(currentTf,strictMode)};
 render('D1', false);
 </script>
 </body>
