@@ -493,12 +493,18 @@ function runBacktestForPair(arr, year='2026', trailing=false, startCapital=10000
   const trades=[];
   let equity = Number(startCapital);
 
-  for(let i=70;i<rows.length-8;i++){
+  const warmup = Math.min(70, Math.max(25, Math.floor(rows.length*0.2)));
+  for(let i=warmup;i<rows.length-8;i++){
     const slice = rows.slice(Math.max(0,i-70), i+1);
     const st = structure(slice);
-    const cl = classify(slice, st.trend, st.events, st.S, false, true, slice);
+    // Voor backtest minder strikt dan signal dashboard (anders te weinig trades)
+    const cl = classify(slice, st.trend, st.events, st.S, false, false, slice);
     let side = cl.localState.includes('BEARISH') ? 'SELL' : cl.localState.includes('BULLISH') ? 'BUY' : null;
-    if(!side || cl.pattern==='NO TRADE (STRICT PDF)') continue;
+    if(!side){
+      // fallback: gebruik trendrichting
+      side = st.trend==='bear' ? 'SELL' : st.trend==='bull' ? 'BUY' : null;
+    }
+    if(!side) continue;
 
     const zones = fibZonesFromSwings(slice, st.S);
     const entry = rows[i].close;
