@@ -86,6 +86,8 @@
       <h3 style="margin:4px 0 8px">Backtest Dashboard (Wins / Losses / Break-even)</h3>
       <div class="btns" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
         <select id="btYear" style="background:#1a254d;color:#dbe7ff;border:1px solid #304084;border-radius:10px;padding:7px 10px"><option>2024</option><option>2025</option><option selected>2026</option></select>
+        <label style="display:flex;align-items:center;gap:6px">Startkapitaal € <input id="btCapital" type="number" value="10000" min="100" step="100" style="width:110px;background:#1a254d;color:#dbe7ff;border:1px solid #304084;border-radius:8px;padding:5px 8px"></label>
+        <label style="display:flex;align-items:center;gap:6px">Risico % <input id="btRisk" type="number" value="1" min="0.1" max="5" step="0.1" style="width:70px;background:#1a254d;color:#dbe7ff;border:1px solid #304084;border-radius:8px;padding:5px 8px"></label>
         <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="btTrailing" /> Trailing ON</label>
         <button id="btRun">Run backtest</button>
         <span id="btStatus" class="k"></span>
@@ -99,7 +101,7 @@
       </div>
       <div class="card">
         <h3>Laatste trades</h3>
-        <div style="max-height:350px;overflow:auto"><table id="btTable"><thead><tr><th>Date</th><th>Side</th><th>Entry</th><th>SL</th><th>TP</th><th>Result</th></tr></thead><tbody></tbody></table></div>
+        <div style="max-height:350px;overflow:auto"><table id="btTable"><thead><tr><th>Date</th><th>Side</th><th>Entry</th><th>SL</th><th>TP</th><th>Result</th><th>PnL €</th><th>Equity €</th></tr></thead><tbody></tbody></table></div>
       </div>
     </div>
   </div>
@@ -486,9 +488,11 @@ function render(tf='D1', strictMode=false){
   },{responsive:true});
 }
 
-function runBacktestForPair(arr, year='2026', trailing=false){
+function runBacktestForPair(arr, year='2026', trailing=false, startCapital=10000, riskPct=1){
   const rows = arr.filter(r=>r.date.startsWith(year+'-'));
   const trades=[];
+  let equity = Number(startCapital);
+
   for(let i=70;i<rows.length-8;i++){
     const slice = rows.slice(Math.max(0,i-70), i+1);
     const st = structure(slice);
@@ -502,57 +506,67 @@ function runBacktestForPair(arr, year='2026', trailing=false){
     const risk = Math.max(Math.abs(entry-sl), 0.0020);
     const tp = side==='SELL' ? entry - 2*risk : entry + 2*risk;
 
-    let result='LOSS';
-    let slLive=sl;
+    let result='LOSS', slLive=sl, exitPrice=null;
     for(let j=i+1;j<Math.min(rows.length,i+10);j++){
       const b=rows[j];
       const up = ((b.high-entry)/entry)*100;
       const dn = ((entry-b.low)/entry)*100;
       if(trailing){
         if(side==='BUY'){
-          if(up>=1) slLive=Math.max(slLive, entry); // BE
-          if(up>=2) slLive=Math.max(slLive, entry*1.01); // lock 1%
+          if(up>=1) slLive=Math.max(slLive, entry);
+          if(up>=2) slLive=Math.max(slLive, entry*1.01);
         }else{
           if(dn>=1) slLive=Math.min(slLive, entry);
           if(dn>=2) slLive=Math.min(slLive, entry*0.99);
         }
       }
       if(side==='BUY'){
-        if(b.low<=slLive){ result = slLive===entry ? 'BE' : (slLive>entry ? 'WIN-TS' : 'LOSS'); break; }
-        if(b.high>=tp){ result='WIN'; break; }
+        if(b.low<=slLive){ exitPrice=slLive; result = slLive===entry ? 'BE' : (slLive>entry ? 'WIN-TS' : 'LOSS'); break; }
+        if(b.high>=tp){ exitPrice=tp; result='WIN'; break; }
       } else {
-        if(b.high>=slLive){ result = slLive===entry ? 'BE' : (slLive<entry ? 'WIN-TS' : 'LOSS'); break; }
-        if(b.low<=tp){ result='WIN'; break; }
+        if(b.high>=slLive){ exitPrice=slLive; result = slLive===entry ? 'BE' : (slLive<entry ? 'WIN-TS' : 'LOSS'); break; }
+        if(b.low<=tp){ exitPrice=tp; result='WIN'; break; }
       }
     }
-    trades.push({date:rows[i].date,side,entry,sl,tp,result});
+    if(exitPrice===null){
+      exitPrice = rows[Math.min(rows.length-1, i+9)].close;
+      if(side==='BUY') result = exitPrice>=entry ? 'WIN-TS' : 'LOSS';
+      else result = exitPrice<=entry ? 'WIN-TS' : 'LOSS';
+    }
+
+    const rMultiple = side==='BUY' ? ((exitPrice-entry)/risk) : ((entry-exitPrice)/risk);
+    const riskMoney = equity * (Number(riskPct)/100);
+    const pnl = riskMoney * rMultiple;
+    equity += pnl;
+
+    trades.push({date:rows[i].date,side,entry,sl,tp,result,r:rMultiple,pnl,equity});
   }
   const wins = trades.filter(t=>t.result.startsWith('WIN')).length;
   const losses = trades.filter(t=>t.result==='LOSS').length;
   const be = trades.filter(t=>t.result==='BE').length;
-  return {wins,losses,be,trades,total:trades.length};
+  return {wins,losses,be,trades,total:trades.length,startCapital:Number(startCapital),endCapital:equity};
 }
 
-function renderBacktestBoard(year, trailing){
+function renderBacktestBoard(year, trailing, startCapital, riskPct){
   const btBoard=document.getElementById('btBoard');
   const keys=Object.keys(ALL).sort();
   const blocks=[];
   for(const p of keys){
-    const r=runBacktestForPair(ALL[p], year, trailing);
-    blocks.push(`<button type='button' class='pairCard ${p===currentPair?'active':''}' data-p='${p}'><div class='p'>${p}</div><div class='s'>W:${r.wins} L:${r.losses} BE:${r.be}</div><div class='s'>Trades: ${r.total}</div></button>`);
+    const r=runBacktestForPair(ALL[p], year, trailing, startCapital, riskPct);
+    blocks.push(`<button type='button' class='pairCard ${p===currentPair?'active':''}' data-p='${p}'><div class='p'>${p}</div><div class='s'>W:${r.wins} L:${r.losses} BE:${r.be}</div><div class='s'>End: €${r.endCapital.toFixed(0)}</div></button>`);
   }
   btBoard.innerHTML=blocks.join('');
-  btBoard.querySelectorAll('.pairCard').forEach(el=>el.onclick=()=>{currentPair=el.dataset.p; pairSelect.value=currentPair; renderBacktestDetail(year,trailing); renderBacktestBoard(year,trailing); render(currentTf,strictMode)});
+  btBoard.querySelectorAll('.pairCard').forEach(el=>el.onclick=()=>{currentPair=el.dataset.p; pairSelect.value=currentPair; renderBacktestDetail(year,trailing,startCapital,riskPct); renderBacktestBoard(year,trailing,startCapital,riskPct); render(currentTf,strictMode)});
 }
 
-function renderBacktestDetail(year, trailing){
-  const r=runBacktestForPair(ALL[currentPair]||[], year, trailing);
-  document.getElementById('btDetail').innerHTML = `<div><b>${currentPair}</b> | Jaar ${year} | Trailing: ${trailing?'ON':'OFF'}</div><div style='margin-top:6px'>Wins: <b class='good'>${r.wins}</b> | Losses: <b class='bad'>${r.losses}</b> | Break-even: <b class='warn'>${r.be}</b> | Totaal: <b>${r.total}</b></div>`;
+function renderBacktestDetail(year, trailing, startCapital, riskPct){
+  const r=runBacktestForPair(ALL[currentPair]||[], year, trailing, startCapital, riskPct);
+  document.getElementById('btDetail').innerHTML = `<div><b>${currentPair}</b> | Jaar ${year} | Trailing: ${trailing?'ON':'OFF'} | Risk ${riskPct}%</div><div style='margin-top:6px'>Wins: <b class='good'>${r.wins}</b> | Losses: <b class='bad'>${r.losses}</b> | Break-even: <b class='warn'>${r.be}</b> | Totaal: <b>${r.total}</b></div><div style='margin-top:6px'>Start: <b>€${r.startCapital.toFixed(2)}</b> → Eindtotaal: <b class='good'>€${r.endCapital.toFixed(2)}</b></div>`;
   const tbody=document.querySelector('#btTable tbody');
   tbody.innerHTML='';
   r.trades.slice(-40).reverse().forEach(t=>{
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td>${t.date}</td><td>${t.side}</td><td>${price(t.entry)}</td><td>${price(t.sl)}</td><td>${price(t.tp)}</td><td>${t.result}</td>`;
+    tr.innerHTML=`<td>${t.date}</td><td>${t.side}</td><td>${price(t.entry)}</td><td>${price(t.sl)}</td><td>${price(t.tp)}</td><td>${t.result}</td><td>${t.pnl.toFixed(2)}</td><td>${t.equity.toFixed(2)}</td>`;
     tbody.appendChild(tr);
   });
 }
@@ -585,6 +599,7 @@ const bD1=document.getElementById('tfD1'), bH4=document.getElementById('tfH4'), 
 const tabAnalysis=document.getElementById('tabAnalysis'), tabBacktest=document.getElementById('tabBacktest');
 const analysisView=document.getElementById('analysisView'), backtestView=document.getElementById('backtestView');
 const btYear=document.getElementById('btYear'), btTrailing=document.getElementById('btTrailing'), btRun=document.getElementById('btRun'), btStatus=document.getElementById('btStatus');
+const btCapital=document.getElementById('btCapital'), btRisk=document.getElementById('btRisk');
 let currentTf='D1', strictMode=false, rrMult=2;
 bD1.onclick=()=>{currentTf='D1';bD1.classList.add('active');bH4.classList.remove('active');render(currentTf,strictMode)};
 bH4.onclick=()=>{currentTf='H4';bH4.classList.add('active');bD1.classList.remove('active');render(currentTf,strictMode)};
@@ -595,26 +610,29 @@ const pairKeys=Object.keys(ALL).sort();
 pairSelect.innerHTML = pairKeys.map(p=>`<option value="${p}">${p}</option>`).join('');
 if(!pairKeys.includes(currentPair) && pairKeys.length) currentPair=pairKeys[0];
 pairSelect.value=currentPair;
-pairSelect.onchange=()=>{currentPair=pairSelect.value; renderPairBoard(); render(currentTf,strictMode); renderBacktestBoard(btYear.value, btTrailing.checked); renderBacktestDetail(btYear.value, btTrailing.checked)};
+pairSelect.onchange=()=>{currentPair=pairSelect.value; renderPairBoard(); render(currentTf,strictMode); renderBacktestBoard(btYear.value, btTrailing.checked, Number(btCapital.value||10000), Number(btRisk.value||1)); renderBacktestDetail(btYear.value, btTrailing.checked, Number(btCapital.value||10000), Number(btRisk.value||1))};
 
 tabAnalysis.onclick=()=>{tabAnalysis.classList.add('active');tabBacktest.classList.remove('active');analysisView.classList.remove('hidden');backtestView.classList.add('hidden');};
-tabBacktest.onclick=()=>{tabBacktest.classList.add('active');tabAnalysis.classList.remove('active');backtestView.classList.remove('hidden');analysisView.classList.add('hidden');renderBacktestBoard(btYear.value, btTrailing.checked);renderBacktestDetail(btYear.value, btTrailing.checked);};
+tabBacktest.onclick=()=>{tabBacktest.classList.add('active');tabAnalysis.classList.remove('active');backtestView.classList.remove('hidden');analysisView.classList.add('hidden');renderBacktestBoard(btYear.value, btTrailing.checked, Number(btCapital.value||10000), Number(btRisk.value||1));renderBacktestDetail(btYear.value, btTrailing.checked, Number(btCapital.value||10000), Number(btRisk.value||1));};
 
 function runBacktestUI(){
   btRun.textContent='Running...';
   btStatus.textContent='';
   const y=btYear.value, tr=btTrailing.checked;
+  const cap=Number(btCapital.value||10000), risk=Number(btRisk.value||1);
   setTimeout(()=>{
-    renderBacktestBoard(y, tr);
-    renderBacktestDetail(y, tr);
+    renderBacktestBoard(y, tr, cap, risk);
+    renderBacktestDetail(y, tr, cap, risk);
     btRun.textContent='Run backtest';
-    btStatus.textContent=`Klaar: ${y} | Trailing ${tr?'ON':'OFF'} | ${new Date().toLocaleTimeString()}`;
+    btStatus.textContent=`Klaar: ${y} | Trailing ${tr?'ON':'OFF'} | Start €${cap} | Risk ${risk}% | ${new Date().toLocaleTimeString()}`;
   }, 0);
 }
 
 btRun.onclick=runBacktestUI;
 btYear.onchange=runBacktestUI;
 btTrailing.onchange=runBacktestUI;
+btCapital.onchange=runBacktestUI;
+btRisk.onchange=runBacktestUI;
 
 renderPairBoard();
 render('D1', false);
