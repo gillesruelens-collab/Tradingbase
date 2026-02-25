@@ -338,8 +338,10 @@ function render(tf='D1', strictMode=false){
   const supplyZone = {low:zones.supplyLow, high:zones.supplyHigh};
   const demandZone = {low:zones.demandLow, high:zones.demandHigh};
 
-  let sl = tradeSide==='sell' ? (supplyZone.high + 0.0006) : (demandZone.low - 0.0006);
-  const risk = Math.max(Math.abs(entry-sl), 0.0012);
+  // SL ruimer buiten zone (buffer + ATR-achtige minimum afstand)
+  const zoneBuffer = 0.0015; // 15 pips
+  let sl = tradeSide==='sell' ? (supplyZone.high + zoneBuffer) : (demandZone.low - zoneBuffer);
+  const risk = Math.max(Math.abs(entry-sl), 0.0020); // min 20 pips risk zodat TP/SL niet op elkaar plakken
   let tp1 = tradeSide==='sell' ? entry - risk*rrMult : entry + risk*rrMult;
   let tp2 = tradeSide==='sell' ? entry - risk*(rrMult+1) : entry + risk*(rrMult+1);
 
@@ -365,6 +367,17 @@ function render(tf='D1', strictMode=false){
     tShapes.push({type:'line',x0:xD[start],x1:xD[xD.length-1],y0:tp2,y1:tp2,line:{color:'#f7b500',dash:'dot',width:2}});
   }
 
+  // Simpele bearish-W tekening met laatste 5 swing-pivots
+  if(tradeSide==='sell'){
+    const piv=[...stD.S.highs.slice(-3).map(p=>({...p,t:'H'})), ...stD.S.lows.slice(-3).map(p=>({...p,t:'L'}))]
+      .sort((a,b)=>a.i-b.i)
+      .slice(-5);
+    for(let k=1;k<piv.length;k++){
+      const a=piv[k-1], b=piv[k];
+      tShapes.push({type:'line',x0:dDaily[a.i].date,x1:dDaily[b.i].date,y0:a.price,y1:b.price,line:{color:'#ff9fb0',width:2}});
+    }
+  }
+
   const tAnn=[
     {x:xD[xD.length-1],y:entry,text:`Entry ${price(entry)}`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#b8cbff'}},
     {x:xD[xD.length-1],y:sl,text:`SL ${price(sl)}`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#ff9fb0'}},
@@ -372,6 +385,9 @@ function render(tf='D1', strictMode=false){
   ];
   if(activeZone){
     tAnn.push({x:xD[xD.length-1],y:activeZone.high,text:`${activeZone.name} Fib(61.8-100): ${price(activeZone.low)}-${price(activeZone.high)} | reacts ${activeZone.rx.reactions}/${activeZone.rx.touches}`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:tradeSide==='sell'?'#ffb3bf':'#8df0c9'}});
+  }
+  if(tradeSide==='sell'){
+    tAnn.push({x:xD[xD.length-1],y:hD.slice(-20).reduce((a,b)=>Math.max(a,b),-1e9)-0.0005,text:'Bearish W (schematisch)',showarrow:false,xanchor:'right',font:{size:10,color:'#ff9fb0'}});
   }
   if(tradeSide!=='none'){
     tAnn.push({x:xD[xD.length-1],y:tp1,text:`TP1 ${price(tp1)} (RR ${rrMult.toFixed(0)}R)`,showarrow:false,xanchor:'left',xshift:8,font:{size:10,color:'#ffd166'}});
