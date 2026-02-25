@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>1Candle NY Session Strategy</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <script src="./data/forex_data.js"></script>
+  <style>
+    :root{--bg:#0b1020;--card:#111831;--line:#243064;--txt:#eaf0ff;--muted:#9fb0d0;--up:#2ad08f;--down:#ff6b7d;--warn:#ffd77a}
+    body{margin:0;background:var(--bg);color:var(--txt);font-family:Inter,system-ui,Arial}
+    .wrap{max-width:1280px;margin:0 auto;padding:16px}
+    .top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+    .k{font-size:12px;color:var(--muted)}
+    .btns button,.btns select,.btns input{background:#1a254d;color:#dbe7ff;border:1px solid #304084;border-radius:10px;padding:7px 10px}
+    .tabs{display:flex;gap:8px;margin:12px 0}.tabs button.active{background:#3553bf}
+    .hidden{display:none}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px}
+    .grid{display:grid;grid-template-columns:repeat(4,minmax(170px,1fr));gap:10px;margin:12px 0}
+    .board{display:grid;grid-template-columns:repeat(6,minmax(130px,1fr));gap:8px;margin:10px 0}
+    .pairCard{background:#101733;border:1px solid #233065;border-radius:10px;padding:8px;cursor:pointer;color:#eaf0ff;text-align:left}
+    .pairCard.active{outline:1px solid #6f8dff}
+    .pairCard .p{font-weight:700;font-size:12px}.pairCard .s{font-size:11px;color:#b8cbff}
+    #chart{height:62vh;min-height:480px;background:var(--card);border:1px solid var(--line);border-radius:12px}
+    .row{display:grid;grid-template-columns:2fr 1fr;gap:10px;margin-top:10px}
+    table{width:100%;border-collapse:collapse;font-size:12px}
+    th,td{padding:6px;border-bottom:1px solid var(--line);text-align:right}
+    th:first-child,td:first-child{text-align:left}
+    .good{color:var(--up)} .bad{color:var(--down)} .warn{color:var(--warn)}
+    .row-win{background:rgba(42,208,143,.2)} .row-loss{background:rgba(255,107,125,.2)}
+    @media(max-width:980px){.grid{grid-template-columns:1fr 1fr}.row{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <h1 style="margin:4px 0">🕯️ 1Candle NY Session Strategy</h1>
+      <div class="k">Flow: NY open → wacht 1e 15m close → trek high/low (wick inbegrepen) → 1m close buiten range → retest → entry RR 1:2</div>
+    </div>
+    <div class="btns" style="display:flex;gap:8px;flex-wrap:wrap">
+      <a href="./index.html" style="text-decoration:none;background:#1a254d;color:#dbe7ff;border:1px solid #304084;border-radius:10px;padding:7px 10px">← Dashboard</a>
+      <select id="pairSelect"></select>
+      <button id="rrBtn">RR 1:2</button>
+    </div>
+  </div>
+
+  <div class="tabs btns">
+    <button id="tabAnalysis" class="active">Analyse</button>
+    <button id="tabBacktest">Backtest (alle paren)</button>
+  </div>
+
+  <div id="analysisView">
+    <div class="grid" id="stats"></div>
+    <div id="chart"></div>
+    <div class="row">
+      <div class="card">
+        <h3 style="margin:4px 0 8px">Setup uitleg</h3>
+        <div id="advice" style="line-height:1.6"></div>
+      </div>
+      <div class="card">
+        <h3 style="margin:4px 0 8px">Laatste candles</h3>
+        <div style="max-height:330px;overflow:auto"><table id="tbl"><thead><tr><th>Date</th><th>Open</th><th>High</th><th>Low</th><th>Close</th></tr></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="backtestView" class="hidden">
+    <div class="card">
+      <h3 style="margin:4px 0 8px">Backtest Dashboard – 1Candle NY Session (proxy op D1 data)</h3>
+      <div class="btns" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <select id="btYear"><option>2024</option><option>2025</option><option selected>2026</option></select>
+        <label>Start € <input id="btCapital" type="number" value="10000" min="100" step="100" style="width:120px"></label>
+        <label>Risk % <input id="btRisk" type="number" value="1" min="0.1" max="5" step="0.1" style="width:70px"></label>
+        <button id="btRun">Run backtest</button>
+        <span id="btStatus" class="k"></span>
+      </div>
+      <div id="btBoard" class="board"></div>
+    </div>
+    <div class="row">
+      <div class="card"><h3>Detail</h3><div id="btDetail"></div></div>
+      <div class="card"><h3>Laatste trades</h3><div style="max-height:350px;overflow:auto"><table id="btTable"><thead><tr><th>Date</th><th>Side</th><th>Entry</th><th>SL</th><th>TP</th><th>Result</th><th>PnL €</th><th>Equity €</th></tr></thead><tbody></tbody></table></div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const ALL = window.FOREX_DATA || {};
+let currentPair = Object.keys(ALL).sort()[0] || 'EURUSD';
+let rr = 2;
+
+function price(v){return Number(v).toFixed(5)}
+function pip(v){return (v*10000).toFixed(1)}
+
+// Simuleert de NY-open 15m candle op basis van D1 candle info (proxy)
+function ny15Proxy(day){
+  const range = Math.max(day.high-day.low, 0.0008);
+  const dirUp = day.close >= day.open;
+  const open = day.open;
+  let high, low, close;
+  if(dirUp){
+    low = Math.max(day.low, open - range*0.28);
+    high = Math.min(day.high, open + range*0.35);
+    close = open + range*0.15;
+  }else{
+    high = Math.min(day.high, open + range*0.28);
+    low = Math.max(day.low, open - range*0.35);
+    close = open - range*0.15;
+  }
+  return {open, high, low, close};
+}
+
+// 1m breakout + retest proxy:
+// BUY: day close boven nyHigh én low retest <= nyHigh
+// SELL: day close onder nyLow én high retest >= nyLow
+function detectTrade(day){
+  const ny = ny15Proxy(day);
+  const closeAbove = day.close > ny.high;
+  const closeBelow = day.close < ny.low;
+  const retestBuy = day.low <= ny.high;
+  const retestSell = day.high >= ny.low;
+
+  if(closeAbove && retestBuy){
+    const entry = ny.high;
+    const sl = ny.low;
+    const risk = Math.max(entry-sl, 0.0006);
+    return {side:'BUY', ny, entry, sl, tp:entry + rr*risk};
+  }
+  if(closeBelow && retestSell){
+    const entry = ny.low;
+    const sl = ny.high;
+    const risk = Math.max(sl-entry, 0.0006);
+    return {side:'SELL', ny, entry, sl, tp:entry - rr*risk};
+  }
+  return {side:null, ny};
+}
+
+function resolveTrade(rows, i, t){
+  let result='LOSS', exit=t.entry;
+  for(let j=i+1;j<Math.min(rows.length,i+6);j++){
+    const b=rows[j];
+    if(t.side==='BUY'){
+      if(b.low<=t.sl){result='LOSS';exit=t.sl;break;}
+      if(b.high>=t.tp){result='WIN';exit=t.tp;break;}
+    }else{
+      if(b.high>=t.sl){result='LOSS';exit=t.sl;break;}
+      if(b.low<=t.tp){result='WIN';exit=t.tp;break;}
+    }
+  }
+  return {result, exit};
+}
+
+function runBacktestPair(arr, year='2026', startCapital=10000, riskPct=1){
+  const rows = arr.filter(r=>String(r.date).startsWith(year+'-'));
+  let equity = Number(startCapital);
+  const trades=[];
+  for(let i=20;i<rows.length-6;i++){
+    const t = detectTrade(rows[i]);
+    if(!t.side) continue;
+    const out = resolveTrade(rows, i, t);
+    const risk = Math.max(Math.abs(t.entry-t.sl),0.0006);
+    const r = t.side==='BUY' ? (out.exit-t.entry)/risk : (t.entry-out.exit)/risk;
+    const pnl = equity*(Number(riskPct)/100)*r;
+    equity += pnl;
+    trades.push({date:rows[i].date,side:t.side,entry:t.entry,sl:t.sl,tp:t.tp,result:out.result,pnl,equity,ny:t.ny});
+  }
+  const wins=trades.filter(t=>t.result==='WIN').length;
+  const losses=trades.filter(t=>t.result==='LOSS').length;
+  return {wins,losses,total:trades.length,trades,endCapital:equity,startCapital:Number(startCapital)};
+}
+
+function renderAnalysis(){
+  const arr = ALL[currentPair] || [];
+  if(!arr.length) return;
+  const last = arr[arr.length-1];
+  const t = detectTrade(last);
+
+  const stats=[
+    ['Pair', currentPair],
+    ['Laatste close', price(last.close)],
+    ['NY15 high', price(t.ny.high)],
+    ['NY15 low', price(t.ny.low)],
+    ['Breakout side', t.side || 'NONE'],
+    ['RR model', `1:${rr}`],
+    ['Range NY15', `${pip(t.ny.high-t.ny.low)} pips`],
+    ['Status', t.side ? 'Wachten op retest/entry' : 'Geen setup']
+  ];
+  document.getElementById('stats').innerHTML = stats.map(([k,v])=>`<div class='card'><div class='k'>${k}</div><div style='font-size:20px;font-weight:700'>${v}</div></div>`).join('');
+
+  const data = arr.slice(-90);
+  const X=data.map(d=>d.date), O=data.map(d=>d.open), H=data.map(d=>d.high), L=data.map(d=>d.low), C=data.map(d=>d.close);
+  const x0=X[Math.max(0,X.length-45)], x1=X[X.length-1];
+  const shapes=[
+    {type:'line',x0,x1,y0:t.ny.high,y1:t.ny.high,line:{color:'#58f3b7',width:1,dash:'dash'}},
+    {type:'line',x0,x1,y0:t.ny.low,y1:t.ny.low,line:{color:'#ff8ea0',width:1,dash:'dash'}}
+  ];
+  if(t.side){
+    shapes.push({type:'line',x0,x1,y0:t.entry,y1:t.entry,line:{color:'#9ec5ff',width:1}});
+    shapes.push({type:'line',x0,x1,y0:t.sl,y1:t.sl,line:{color:'#ff8ea0',width:1,dash:'dot'}});
+    shapes.push({type:'line',x0,x1,y0:t.tp,y1:t.tp,line:{color:'#ffd77a',width:1,dash:'dot'}});
+  }
+
+  Plotly.newPlot('chart',[{type:'candlestick',x:X,open:O,high:H,low:L,close:C,increasing:{line:{color:'#2ad08f'}},decreasing:{line:{color:'#ff6b7d'}}}],{
+    paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#111831',font:{color:'#dbe7ff'},margin:{l:48,r:70,t:10,b:35},showlegend:false,
+    xaxis:{rangeslider:{visible:false},gridcolor:'#1f2d5f'},yaxis:{tickformat:'.5f',gridcolor:'#1f2d5f'},shapes,
+    annotations:[
+      {x:x1,y:t.ny.high,text:'NY15 High',showarrow:false,xanchor:'right',xshift:-6,font:{size:10,color:'#58f3b7'}},
+      {x:x1,y:t.ny.low,text:'NY15 Low',showarrow:false,xanchor:'right',xshift:-6,font:{size:10,color:'#ff8ea0'}}
+    ]
+  },{responsive:true});
+
+  document.getElementById('advice').innerHTML = `
+    <div><b>Regels:</b></div>
+    <div>1) NY open: wacht op eerste 15m candle close.</div>
+    <div>2) Trek lijnen op high + low van die candle (wick inbegrepen).</div>
+    <div>3) Switch naar 1m.</div>
+    <div>4) Sluit 1m boven high? Wacht retest → BUY.</div>
+    <div>5) Sluit 1m onder low? Wacht retest → SELL.</div>
+    <div>6) TP = 1:2 RR vanaf entry/SL.</div>
+    <div style='margin-top:8px' class='k'>Backtest gebruikt D1-proxy omdat geen intraday NY-session feed aanwezig is in de huidige dataset.</div>
+  `;
+
+  const tbody=document.querySelector('#tbl tbody'); tbody.innerHTML='';
+  data.slice(-20).reverse().forEach(d=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${d.date}</td><td>${price(d.open)}</td><td>${price(d.high)}</td><td>${price(d.low)}</td><td>${price(d.close)}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderBacktestBoard(){
+  const y=document.getElementById('btYear').value;
+  const cap=Number(document.getElementById('btCapital').value||10000);
+  const risk=Number(document.getElementById('btRisk').value||1);
+  const keys=Object.keys(ALL).sort();
+  const board=document.getElementById('btBoard');
+  board.innerHTML = keys.map(p=>{
+    const r = runBacktestPair(ALL[p]||[], y, cap, risk);
+    return `<button class='pairCard ${p===currentPair?'active':''}' data-p='${p}'><div class='p'>${p}</div><div class='s'>W:${r.wins} L:${r.losses} T:${r.total}</div><div class='s'>End €${r.endCapital.toFixed(0)}</div></button>`;
+  }).join('');
+
+  board.querySelectorAll('.pairCard').forEach(el=>el.onclick=()=>{
+    currentPair=el.dataset.p;
+    document.getElementById('pairSelect').value=currentPair;
+    renderAnalysis();
+    renderBacktestBoard();
+    renderBacktestDetail();
+  });
+}
+
+function renderBacktestDetail(){
+  const y=document.getElementById('btYear').value;
+  const cap=Number(document.getElementById('btCapital').value||10000);
+  const risk=Number(document.getElementById('btRisk').value||1);
+  const r = runBacktestPair(ALL[currentPair]||[], y, cap, risk);
+
+  document.getElementById('btDetail').innerHTML = `<div><b>${currentPair}</b> | Jaar ${y} | RR 1:${rr} | Risk ${risk}%</div><div style='margin-top:6px'>Wins <b class='good'>${r.wins}</b> | Losses <b class='bad'>${r.losses}</b> | Trades ${r.total}</div><div style='margin-top:6px'>Start €${r.startCapital.toFixed(2)} → End €<b>${r.endCapital.toFixed(2)}</b></div>`;
+
+  const tbody=document.querySelector('#btTable tbody'); tbody.innerHTML='';
+  r.trades.slice(-120).reverse().forEach(t=>{
+    const tr=document.createElement('tr');
+    tr.className = t.result==='WIN' ? 'row-win' : 'row-loss';
+    tr.innerHTML=`<td>${t.date}</td><td>${t.side}</td><td>${price(t.entry)}</td><td>${price(t.sl)}</td><td>${price(t.tp)}</td><td class='${t.result==='WIN'?'good':'bad'}'><b>${t.result}</b></td><td>${t.pnl.toFixed(2)}</td><td>${t.equity.toFixed(2)}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+const pairSelect=document.getElementById('pairSelect');
+pairSelect.innerHTML = Object.keys(ALL).sort().map(p=>`<option value='${p}'>${p}</option>`).join('');
+if(Object.keys(ALL).includes(currentPair)) pairSelect.value=currentPair;
+pairSelect.onchange=()=>{currentPair=pairSelect.value;renderAnalysis();renderBacktestBoard();renderBacktestDetail();};
+
+document.getElementById('rrBtn').onclick=()=>{rr = rr===2 ? 3 : 2; document.getElementById('rrBtn').textContent=`RR 1:${rr}`; renderAnalysis(); renderBacktestBoard(); renderBacktestDetail();};
+
+document.getElementById('tabAnalysis').onclick=()=>{
+  document.getElementById('tabAnalysis').classList.add('active');
+  document.getElementById('tabBacktest').classList.remove('active');
+  document.getElementById('analysisView').classList.remove('hidden');
+  document.getElementById('backtestView').classList.add('hidden');
+};
+
+document.getElementById('tabBacktest').onclick=()=>{
+  document.getElementById('tabBacktest').classList.add('active');
+  document.getElementById('tabAnalysis').classList.remove('active');
+  document.getElementById('backtestView').classList.remove('hidden');
+  document.getElementById('analysisView').classList.add('hidden');
+  renderBacktestBoard();
+  renderBacktestDetail();
+};
+
+document.getElementById('btRun').onclick=()=>{
+  document.getElementById('btStatus').textContent='Running...';
+  setTimeout(()=>{
+    renderBacktestBoard();
+    renderBacktestDetail();
+    document.getElementById('btStatus').textContent=`Klaar ${new Date().toLocaleTimeString()}`;
+  },0);
+};
+
+['btYear','btCapital','btRisk'].forEach(id=>document.getElementById(id).onchange=()=>{renderBacktestBoard();renderBacktestDetail();});
+
+renderAnalysis();
+renderBacktestBoard();
+renderBacktestDetail();
+</script>
+</body>
+</html>
