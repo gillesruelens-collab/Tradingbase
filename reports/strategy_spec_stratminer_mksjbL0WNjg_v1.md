@@ -1,5 +1,6 @@
-# Strategy Spec — StratMiner v2
+# Strategy Spec — 2lines strategy-15minutes
 
+- **Strategy name:** 2lines strategy-15minutes
 - **Source video:** https://www.youtube.com/watch?v=MKsjbL0WNjg
 - **Spec version:** v1
 - **Status:** Transcript-backed (based on user-provided transcript)
