@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Golden Bullet V3 — Trade Review (BE @ +1R)</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    :root{--bg:#0b1020;--card:#111831;--line:#243064;--txt:#eaf0ff;--muted:#9fb0d0;--up:#2ad08f;--down:#ff6b7d;--warn:#ffd77a}
+    body{margin:0;background:var(--bg);color:var(--txt);font-family:Inter,system-ui,Arial}
+    .wrap{max-width:1320px;margin:0 auto;padding:16px}
+    .top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+    .k{font-size:12px;color:var(--muted)}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px}
+    .grid{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:10px;margin:12px 0}
+    .row{display:grid;grid-template-columns:1.1fr 1.9fr;gap:10px}
+    table{width:100%;border-collapse:collapse;font-size:12px}
+    th,td{padding:6px;border-bottom:1px solid var(--line);text-align:right}
+    th:first-child,td:first-child{text-align:left}
+    tr{cursor:pointer}
+    tr.active{outline:1px solid #6f8dff;background:rgba(111,141,255,.12)}
+    .good{color:var(--up)} .bad{color:var(--down)} .warn{color:var(--warn)}
+    #chart{height:68vh;min-height:520px}
+    @media(max-width:980px){.grid{grid-template-columns:1fr 1fr}.row{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <h1 style="margin:4px 0">🥇 Golden Bullet Strategy — V3 Trades</h1>
+      <div class="k">EURUSD M1 • Jan 2026 • BE stap actief op +1R (oranje) • klik op een trade voor visuele voorstelling</div>
+    </div>
+    <div><a href="./index.html" style="text-decoration:none;color:#dbe7ff;border:1px solid #304084;background:#1a254d;border-radius:10px;padding:8px 10px">← Dashboard</a></div>
+  </div>
+
+  <div class="grid" id="stats"></div>
+
+  <div class="row">
+    <div class="card">
+      <h3 style="margin:4px 0 8px">Trades</h3>
+      <div style="max-height:70vh;overflow:auto">
+        <table id="tbl">
+          <thead><tr><th>ID</th><th>Date</th><th>Side</th><th>Result</th><th>PnL</th><th>Equity</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin:4px 0 8px">Trade Visual</h3>
+      <div id="tradeInfo" class="k" style="margin-bottom:8px">Kies een trade links.</div>
+      <div id="chart"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let candles=[];
+let trades=[];
+
+function price(v){return Number(v).toFixed(5)}
+
+async function loadCSV(path){
+  const txt=await (await fetch(path)).text();
+  const lines=txt.trim().split(/\r?\n/);
+  const out=[];
+  for(let i=1;i<lines.length;i++){
+    const [ts,o,h,l,c]=lines[i].split(',');
+    out.push({idx:i-1,ts,o:+o,h:+h,l:+l,c:+c});
+  }
+  return out;
+}
+
+function renderStats(summary){
+  const wins=trades.filter(t=>t.result==='WIN').length;
+  const be=trades.filter(t=>t.result==='BE').length;
+  const losses=trades.filter(t=>t.result.includes('LOSS')).length;
+  const wr=trades.length?((wins/trades.length)*100).toFixed(2):'0.00';
+  const stats=[
+    ['Trades', trades.length],
+    ['Wins', `<span class='good'>${wins}</span>`],
+    ['Break-even', `<span class='warn'>${be}</span>`],
+    ['Losses', `<span class='bad'>${losses}</span>`],
+    ['Win rate', `${wr}%`],
+    ['Net PnL', `<span class='${summary.net_pnl>=0?'good':'bad'}'>${summary.net_pnl.toFixed(2)}</span>`]
+  ];
+  document.getElementById('stats').innerHTML=stats.map(([k,v])=>`<div class='card'><div class='k'>${k}</div><div style='font-size:20px;font-weight:700'>${v}</div></div>`).join('');
+}
+
+function renderTable(){
+  const tb=document.querySelector('#tbl tbody');
+  tb.innerHTML='';
+  trades.forEach((t,i)=>{
+    const tr=document.createElement('tr');
+    tr.dataset.i=i;
+    const cls = t.result==='BE' ? 'warn' : (t.result.includes('LOSS') ? 'bad' : 'good');
+    tr.innerHTML=`<td>${t.trade_id}</td><td>${t.date}</td><td>${t.side}</td><td class='${cls}'><b>${t.result}</b></td><td>${t.pnl.toFixed(2)}</td><td>${t.equity.toFixed(2)}</td>`;
+    tr.onclick=()=>{tb.querySelectorAll('tr').forEach(x=>x.classList.remove('active')); tr.classList.add('active'); renderTrade(i)};
+    tb.appendChild(tr);
+  });
+  if(trades.length){
+    tb.querySelector('tr')?.classList.add('active');
+    renderTrade(0);
+  }
+}
+
+function renderTrade(i){
+  const t=trades[i];
+  const s=Math.max(0,t.entry_idx-120), e=Math.min(candles.length-1,t.exit_idx+120);
+  const sl=candles.slice(s,e+1);
+  const x=sl.map(c=>c.ts), o=sl.map(c=>c.o), h=sl.map(c=>c.h), l=sl.map(c=>c.l), c=sl.map(c=>c.c);
+
+  const resCls = t.result==='BE' ? 'warn' : (t.result.includes('LOSS') ? 'bad' : 'good');
+  document.getElementById('tradeInfo').innerHTML = `${t.date} | ${t.side} | Entry <b>${price(t.entry)}</b> | SL <b>${price(t.sl0)}</b> | TP1 <b>${price(t.tp1p)}</b> | TP2 <b>${price(t.tp2p)}</b> | Exit <b>${price(t.exit_price)}</b> | Result <b class='${resCls}'>${t.result}</b>`;
+
+  Plotly.newPlot('chart',[
+    {type:'candlestick',x,open:o,high:h,low:l,close:c,increasing:{line:{color:'#2ad08f'}},decreasing:{line:{color:'#ff6b7d'}}},
+    {type:'scatter',mode:'markers+text',x:[candles[t.entry_idx]?.ts,candles[t.exit_idx]?.ts],y:[t.entry,t.exit_price],text:['ENTRY','EXIT'],textposition:'top center',marker:{size:10,color:['#58f3b7', t.result.includes('LOSS')?'#ff8ea0':'#58f3b7']},hoverinfo:'skip'}
+  ],{
+    paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#111831',font:{color:'#dbe7ff'},showlegend:false,
+    margin:{l:48,r:20,t:10,b:30},xaxis:{rangeslider:{visible:false},gridcolor:'#1f2d5f'},yaxis:{tickformat:'.5f',gridcolor:'#1f2d5f'},
+    shapes:[
+      {type:'line',x0:x[0],x1:x[x.length-1],y0:t.entry,y1:t.entry,line:{color:'#9ec5ff',width:1}},
+      {type:'line',x0:x[0],x1:x[x.length-1],y0:t.sl0,y1:t.sl0,line:{color:'#ff8ea0',width:1,dash:'dot'}},
+      {type:'line',x0:x[0],x1:x[x.length-1],y0:t.tp1p,y1:t.tp1p,line:{color:'#ffd77a',width:1,dash:'dash'}},
+      {type:'line',x0:x[0],x1:x[x.length-1],y0:t.tp2p,y1:t.tp2p,line:{color:'#f7b500',width:1,dash:'dot'}}
+    ]
+  },{responsive:true});
+}
+
+(async()=>{
+  const [tres,csv] = await Promise.all([
+    fetch('./data/golden_bullet_v3_trades.json').then(r=>r.json()),
+    loadCSV('./data/EURUSD_M1_2026-01.csv')
+  ]);
+  trades=tres.trades; candles=csv;
+  renderStats(tres.summary);
+  renderTable();
+})();
+</script>
+</body>
+</html>
