@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tradingbase",
+  "compatibility_date": "2026-04-28",
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "gaming-pc-demo"
+  },
+  "compatibility_flags": [
+    "nodejs_compat"
+  ]
+}
